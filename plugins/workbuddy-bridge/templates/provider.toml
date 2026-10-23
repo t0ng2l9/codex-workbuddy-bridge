@@ -1,13 +1,14 @@
-# 追加到 %USERPROFILE%\.codex\config.toml
-# （install.cmd 会自动写入；这里是手工安装时的参考）
+# Append to %USERPROFILE%\.codex\config.toml
+# (install.cmd writes this automatically; kept here as a reference for manual setup)
 
 [model_providers.wbbridge]
 name = "WorkBuddy"
 base_url = "http://127.0.0.1:8788/v1"
-# 本地代理不校验密钥，占位即可（真正的登录态在代理里）
+# The local proxy does not validate the key; a placeholder is fine (the real
+# session lives inside the proxy)
 experimental_bearer_token = "wbbridge-local"
 wire_api = "responses"
 requires_openai_auth = false
-# 上游会返回 429，给足退避重试次数
+# The upstream returns 429; allow enough backoff retries
 request_max_retries = 6
 stream_max_retries = 6

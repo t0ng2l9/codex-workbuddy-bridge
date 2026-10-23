@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""WorkBuddy AI → OpenAI 兼容本地代理。
+"""WorkBuddy AI -> OpenAI compatible local proxy.
 
-把 WorkBuddy AI 桌面端的登录态变成任何 OpenAI 兼容客户端可用的
-`/v1/chat/completions`。零外部依赖（仅 stdlib + cryptography）。
+Turns the WorkBuddy AI desktop app session into an OpenAI-compatible
+`/v1/chat/completions` endpoint for any client. No external dependencies
+(only the stdlib plus cryptography).
 
-上游要点（实测得出，非推测）：
-  - 凭据在 %LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth\\workbuddy-desktop-ai.info
-    accessToken/refreshToken 是 AES-256-GCM 信封；密钥要跑 WorkBuddy 自己的
-    Electron 二进制（ELECTRON_RUN_AS_NODE=1）取 workbuddyStorage 绑定。
-  - 对话端点 https://www.workbuddy.ai/v2/chat/completions **必须 stream=true**
-    （否则 400 code 11101），且**首条消息必须是 system**（否则 400 code 11128）。
-  - 模型目录 GET /v3/config，UA 必须带 WorkBuddyAI/<版本>。
-  - 额度 POST /v2/billing/meter/get-user-resource。
-  - 响应里 usage.credit 就是本次实际消耗的积分。
+Upstream notes (measured, not guessed):
+  - Credentials live in %LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth\\workbuddy-desktop-ai.info
+    accessToken/refreshToken are AES-256-GCM envelopes; the key must be read by
+    running WorkBuddy's own Electron binary (ELECTRON_RUN_AS_NODE=1) to reach the
+    workbuddyStorage binding.
+  - The chat endpoint https://www.workbuddy.ai/v2/chat/completions **requires stream=true**
+    (otherwise 400 code 11101), and the **first message must be system** (otherwise 400 code 11128).
+  - Model catalog: GET /v3/config; the UA must carry WorkBuddyAI/<version>.
+  - Quota: POST /v2/billing/meter/get-user-resource.
+  - usage.credit in the response is the number of credits actually spent.
 
-用法：
+Usage:
     python wbproxy.py [--port 8788] [--host 127.0.0.1] [--verbose]
 """
 
@@ -39,44 +41,47 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import wbdiscover
 import wbresponses
 
-# ─────────────────────────── 配置 ───────────────────────────
+# ─────────────────────────── Config ──────────────────────────
 
 GLOBAL_BASE = "https://www.workbuddy.ai"
 
-# 桌面端路径与凭据文件一律自动发现（见 wbdiscover），不写死盘符/用户名。
-# 环境变量 WBBRIDGE_APP / WBBRIDGE_AUTH_FILE 可覆盖。
+# The desktop app path and the credential file are always auto-discovered
+# (see wbdiscover); never hard-code a drive letter or a user name.
+# The WBBRIDGE_APP / WBBRIDGE_AUTH_FILE environment variables override them.
 APP_DIR = wbdiscover.find_app() or ""
 AUTH_FILE = wbdiscover.find_auth_file() or ""
 HELPER_JS = (
     'process.stdout.write(String(process._linkedBinding('
     '"electron_browser_workbuddy_storage").loggerGet()))'
 )
-DEFAULT_KEY = "wbbridge-local"          # 客户端随便填，本地代理不校验
-TOKEN_SKEW_SEC = 120                     # 提前 2 分钟视为过期
+DEFAULT_KEY = "wbbridge-local"          # clients may send anything; the local proxy does not check it
+TOKEN_SKEW_SEC = 120                     # treat the token as expired 2 minutes early
 
 _VERBOSE = False
 
-# 实际生效的模型追踪：代理是唯一看到真实 model 字段的地方，
-# /wb/last-model 据此回答「当前到底在用哪个模型」。
+# Effective-model tracking: the proxy is the only place that sees the real
+# model field, so /wb/last-model answers "which model is actually in use".
 LAST_MODEL: dict = {"model": None, "ts": 0, "count": 0}
 
-# ── 模型同步：桌面端在选择器里切换模型时只作用于当前会话，不会写回
-# config.toml，导致「配置默认」与「实际在用」长期脱节（读配置的人会报错模型）。
-# 代理既然每次都看到真实 model，就顺手把顶层 model 同步回配置，让两处一致。
+# -- Model sync: switching models in the desktop picker only affects the current
+# session and is never written back to config.toml, so "configured default" and
+# "actually in use" drift apart (and anything reading the config reports the wrong
+# model). Since the proxy sees the real model on every request, it writes the top
+# level model key back so both sides agree.
 CODEX_CONFIG = os.environ.get(
     "WBBRIDGE_CODEX_CONFIG",
     os.path.join(os.path.expanduser("~"), ".codex", "config.toml"),
 )
 SYNC_CONFIG = os.environ.get("WBBRIDGE_SYNC_CONFIG", "1") not in ("0", "false", "no")
 _SYNC_LOCK = threading.Lock()
-_CONFIG_MODEL: str | None = None          # 已知的配置里写的模型，避免重复读写
+_CONFIG_MODEL: str | None = None          # model currently known to be in the config; avoids repeated I/O
 
 
 def _config_model() -> str | None:
-    """读 config.toml 里第一个顶层 `model = ...`（遇到 [section] 即停）。"""
+    """Read the first top-level `model = ...` in config.toml (stop at any [section])."""
     try:
-        # newline="" 保留原换行符；文本模式读取会把 CRLF 折成 LF，
-        # 之后写回就整份文件被改写（diff 里「整个文件都变了」）。
+        # newline="" preserves the original line endings; plain text mode folds
+        # CRLF into LF, so writing back rewrites the whole file ("every line changed").
         with open(CODEX_CONFIG, encoding="utf-8", newline="") as fh:
             for line in fh:
                 s = line.strip()
@@ -91,7 +96,7 @@ def _config_model() -> str | None:
 
 
 def _sync_config_model(model: str) -> None:
-    """把顶层 model 改成实际在用的模型；只动那一行，其余原样保留。"""
+    """Set the top-level model to the one actually in use; touch only that line."""
     global _CONFIG_MODEL
     if not SYNC_CONFIG or not model:
         return
@@ -104,13 +109,13 @@ def _sync_config_model(model: str) -> None:
             with open(CODEX_CONFIG, encoding="utf-8", newline="") as fh:
                 lines = fh.readlines()
         except OSError as e:
-            log(f"同步模型失败（读不到配置）: {e}")
+            log(f"model sync failed (cannot read config): {e}")
             return
         changed = False
         for i, line in enumerate(lines):
             s = line.strip()
             if s.startswith("["):
-                break                     # 只改顶层键，不碰任何 [section]
+                break                     # only touch top-level keys, never a [section]
             if s.startswith("model ") or s.startswith("model="):
                 if "=" not in s:
                     continue
@@ -123,7 +128,7 @@ def _sync_config_model(model: str) -> None:
                 changed = True
                 break
         if not changed:
-            log(f"同步模型：配置里没有顶层 model 键，跳过")
+            log("model sync: no top-level model key in the config, skipping")
             return
         try:
             tmp = CODEX_CONFIG + ".wbbridge-tmp"
@@ -131,9 +136,9 @@ def _sync_config_model(model: str) -> None:
                 fh.writelines(lines)
             os.replace(tmp, CODEX_CONFIG)
             _CONFIG_MODEL = model
-            log(f"已同步配置默认模型 → {model}")
+            log(f"synced config default model -> {model}")
         except OSError as e:
-            log(f"同步模型失败（写不了配置）: {e}")
+            log(f"model sync failed (cannot write config): {e}")
 
 
 def _note_model(model: str) -> None:
@@ -144,16 +149,17 @@ def _note_model(model: str) -> None:
 
 
 def log(*a):
-    """请求流水（默认静音，--verbose 打开）。"""
+    """Request tracing (silent by default; enable with --verbose)."""
     if _VERBOSE:
         print("[wbproxy]", *a, file=sys.stderr, flush=True)
 
 
 def upstream_error_text(detail) -> str:
-    """把上游错误体压成一行可读摘要。
+    """Flatten an upstream error body into one readable line.
 
-    直接按字数截断原始 JSON 会切掉最有用的中文处置提示（它排在一堆双语字段后面），
-    所以这里解析出 code / msg / displayTips.zh 再拼一行；解析不了才退回截断。
+    Truncating the raw JSON by character count cuts off the most useful hint
+    (it sits behind a pile of bilingual fields), so parse code / msg /
+    displayTips.zh and join them; fall back to truncation only if parsing fails.
     """
     if isinstance(detail, dict):
         o, s = detail, json.dumps(detail, ensure_ascii=False)
@@ -182,7 +188,7 @@ def upstream_error_text(detail) -> str:
         if tip:
             break
 
-    # 上游有时把内层 JSON 再塞在 error.message 字符串里
+    # Upstream sometimes nests another JSON document inside error.message
     if not tip:
         err = o.get("error")
         if isinstance(err, dict) and isinstance(err.get("message"), str):
@@ -199,18 +205,19 @@ def upstream_error_text(detail) -> str:
 
 
 def log_err(*a):
-    """错误类事件，**不受 --verbose 门控**。
+    """Error-level events, **never gated by --verbose**.
 
-    上游报错（尤其 429 / code 14003）是用户唯一能看到原因的地方；如果只在 verbose
-    模式下记录，别人拿到包遇到限流时日志里空空如也，只能来回问。
+    Upstream errors (especially 429 / code 14003) are the only place a user can
+    see why something failed; if they were only logged in verbose mode, anyone
+    hitting a rate limit would find an empty log and have to ask.
     """
     print("[wbproxy]", *a, file=sys.stderr, flush=True)
 
 
-# ─────────────────────── 凭据：解密与刷新 ───────────────────────
+# ─────────────────── Credentials: decrypt and refresh ───────────────────
 
 def _aad(key_id: str, suite: int) -> bytes:
-    """WorkBuddy 的 AAD 构造（照抄其 buildAuthenticatedContextAad）。"""
+    """WorkBuddy AAD construction (mirrors its buildAuthenticatedContextAad)."""
     def lp(s: str) -> bytes:
         b = s.encode("utf-8")
         return struct.pack(">I", len(b)) + b
@@ -220,7 +227,7 @@ def _aad(key_id: str, suite: int) -> bytes:
 
 
 def _electron_payload() -> dict:
-    """跑 WorkBuddy 的 Electron 取 at-rest 密钥。"""
+    """Run WorkBuddy's Electron to obtain the at-rest key."""
     env = dict(os.environ)
     env["ELECTRON_RUN_AS_NODE"] = "1"
     r = subprocess.run(
@@ -229,7 +236,7 @@ def _electron_payload() -> dict:
     )
     if r.returncode != 0 or not r.stdout.strip():
         raise RuntimeError(
-            f"WorkBuddy 密钥助手失败（exit={r.returncode}）；确认 App 已安装：{APP_DIR}"
+            f"WorkBuddy key helper failed (exit={r.returncode}); is the app installed? {APP_DIR}"
         )
     return json.loads(r.stdout.strip())
 
@@ -239,7 +246,7 @@ def _decrypt_field(wrapped: dict, key: bytes) -> str:
 
     inner = json.loads(base64.b64decode(wrapped["envelope"]))
     if inner.get("suite") != 1:
-        raise RuntimeError(f"未知信封 suite={inner.get('suite')}")
+        raise RuntimeError(f"unknown envelope suite={inner.get('suite')}")
     pt = AESGCM(key).decrypt(
         base64.b64decode(inner["nonce"]),
         base64.b64decode(inner["ciphertext"]) + base64.b64decode(inner["authTag"]),
@@ -249,24 +256,24 @@ def _decrypt_field(wrapped: dict, key: bytes) -> str:
 
 
 class Credentials:
-    """WorkBuddy AI 凭据：读桌面端 auth 文件 → 解密 → 到期自动刷新。"""
+    """WorkBuddy AI credentials: read the desktop auth file -> decrypt -> refresh on expiry."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._key: bytes | None = None
-        # 网关的渠道校验认「会话标识」，同一个代理进程复用一次即可。
+        # The gateway's channel check wants a conversation id; reuse one per proxy process.
         self.conversation_id = str(uuid.uuid4())
         self.access_token = ""
         self.refresh_token = ""
         self.uid = ""
         self.domain = ""
-        self.expires_at = 0.0          # epoch 秒
+        self.expires_at = 0.0          # epoch seconds
         self.app_version = "5.5.2"
         self._load_app_version()
         self.reload()
 
     def _load_app_version(self) -> None:
-        """UA 里要带 App 版本，网关按它分流 /v3/config。"""
+        """The UA must carry the app version; the gateway routes /v3/config by it."""
         try:
             vpath = os.path.join(os.path.dirname(APP_DIR), "version")
             v = open(vpath, encoding="utf-8").read().strip()
@@ -280,7 +287,7 @@ class Credentials:
         if self._key is None:
             payload = _electron_payload()
             if payload.get("version") != 1:
-                raise RuntimeError("密钥 payload 版本不符")
+                raise RuntimeError("unexpected key payload version")
             self._key = hashlib.sha256(payload["atRestSecretKey"].encode("utf-8")).digest()
         return self._key
 
@@ -303,16 +310,16 @@ class Credentials:
             self.refresh_token = read("refreshToken")
             self.uid = acct.get("uid", "")
             self.domain = auth.get("domain", "") or "www.workbuddy.ai"
-            # expiresAt 是毫秒
+            # expiresAt is in milliseconds
             raw_exp = auth.get("expiresAt")
             if isinstance(raw_exp, (int, float)) and raw_exp > 0:
                 self.expires_at = raw_exp / 1000.0
             else:
                 exp_in = auth.get("expiresIn") or 0
                 self.expires_at = time.time() + float(exp_in)
-            log(f"凭据已加载 uid={self.uid[:8]}… 到期 {time.strftime('%Y-%m-%d %H:%M', time.localtime(self.expires_at))}")
+            log(f"credentials loaded uid={self.uid[:8]}... expires {time.strftime('%Y-%m-%d %H:%M', time.localtime(self.expires_at))}")
 
-    # ── 请求头 ──
+    # ── Request headers ──
     def _common(self) -> dict:
         return {
             "Accept": "application/json, text/plain, */*",
@@ -333,8 +340,9 @@ class Credentials:
         h = self._common()
         h["Content-Type"] = "application/json"
         h["Authorization"] = "Bearer " + self.access_token
-        # 渠道校验（400 code 11128）：官方客户端每次对话都会带会话/请求标识，
-        # 缺这些头会被判定为「非官方客户端」直接拦截 —— 与 system prompt 无关。
+        # Channel check (400 code 11128): the official client sends conversation and
+        # request ids with every turn; without them the request is rejected as a
+        # non-official client -- nothing to do with the system prompt.
         h["User-Agent"] = f"WorkBuddy/{self.app_version} WorkBuddy/{self.app_version}"
         h["X-Conversation-ID"] = self.conversation_id
         h["X-Conversation-Request-ID"] = str(uuid.uuid4())
@@ -364,10 +372,10 @@ class Credentials:
             self.refresh()
 
     def refresh(self) -> None:
-        """POST /v2/plugin/auth/token/refresh（X-Refresh-Token 只出现在这里）。"""
+        """POST /v2/plugin/auth/token/refresh (the only place X-Refresh-Token appears)."""
         with self._lock:
             if not self.refresh_token:
-                raise RuntimeError("没有 refreshToken")
+                raise RuntimeError("no refreshToken available")
             h = {
                 "Accept": "application/json, text/plain, */*",
                 "X-Requested-With": "XMLHttpRequest",
@@ -382,16 +390,16 @@ class Credentials:
             with urllib.request.urlopen(req, timeout=45) as r:
                 body = json.loads(r.read().decode("utf-8", "replace"))
             if body.get("code") != 0:
-                raise RuntimeError(f"刷新失败: {body.get('msg')}")
+                raise RuntimeError(f"refresh failed: {body.get('msg')}")
             d = body["data"]
             self.access_token = d["accessToken"]
             if d.get("refreshToken"):
                 self.refresh_token = d["refreshToken"]
             exp_in = d.get("expiresIn") or 0
             self.expires_at = time.time() + float(exp_in)
-            log_err("令牌已刷新，新到期", time.strftime("%Y-%m-%d %H:%M", time.localtime(self.expires_at)))
+            log_err("token refreshed; new expiry", time.strftime("%Y-%m-%d %H:%M", time.localtime(self.expires_at)))
 
-    # ── 目录 / 额度 ──
+    # ── Catalog / quota ──
     def catalog(self) -> list[dict]:
         req = urllib.request.Request(GLOBAL_BASE + "/v3/config", headers=self._common())
         with urllib.request.urlopen(req, timeout=45) as r:
@@ -437,20 +445,20 @@ class Credentials:
         }
 
 
-# ─────────────────────────── 上游转发 ───────────────────────────
+# ────────────────────────── Upstream relay ──────────────────────────
 
 CHAT_PATH = "/v2/chat/completions"
 
 
 def _prepare_payload(payload: dict) -> dict:
-    """上游硬约束（实测）：
+    """Hard upstream constraints (measured):
 
-    - 首条消息必须是 ``system``（否则 400 code 11128）；
-    - 完全不接受 ``developer`` 角色（任何位置都报同一个错）；
-    - 必须 ``stream=true``（否则 400 code 11101）。
+    - the first message must be ``system`` (otherwise 400 code 11128);
+    - the ``developer`` role is not accepted at all (same error anywhere);
+    - ``stream=true`` is mandatory (otherwise 400 code 11101).
 
-    有些客户端会把 system 改写成 ``developer``，所以这里统一
-    折回 ``system``，再补一条兜底 system。
+    Some clients rewrite system into ``developer``, so normalise everything back
+    to ``system`` and prepend a fallback system message when there is none.
     """
     payload = dict(payload)
     msgs = []
@@ -466,7 +474,7 @@ def _prepare_payload(payload: dict) -> dict:
 
 
 def open_upstream(creds: Credentials, payload: dict):
-    """返回 (response 对象, 最终 payload)。401 时刷新令牌重试一次。"""
+    """Return (response object, final payload). On 401, refresh the token and retry once."""
     creds.ensure_fresh()
     data = json.dumps(_prepare_payload(payload)).encode("utf-8")
     try:
@@ -477,7 +485,7 @@ def open_upstream(creds: Credentials, payload: dict):
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")
         if e.code in (401, 403):
-            log_err("上游 401/403，刷新令牌后重试")
+            log_err("upstream 401/403; refreshing the token and retrying")
             creds.refresh()
             req = urllib.request.Request(
                 GLOBAL_BASE + CHAT_PATH, data=data, headers=creds.chat_headers(), method="POST"
@@ -494,7 +502,7 @@ class UpstreamError(Exception):
 
 
 def iter_sse(resp):
-    """逐行产出上游 SSE 的 data 部分。"""
+    """Yield the data part of each upstream SSE frame."""
     for raw in resp:
         line = raw.decode("utf-8", "replace").strip()
         if not line.startswith("data:"):
@@ -506,11 +514,11 @@ def iter_sse(resp):
             try:
                 yield json.loads(chunk)
             except json.JSONDecodeError:
-                log("跳过无法解析的 SSE 帧:", chunk[:120])
+                log("skipping unparseable SSE frame:", chunk[:120])
 
 
 def aggregate(events: list[dict], model: str) -> dict:
-    """把 SSE 事件聚合成一个非流式 chat.completion。"""
+    """Aggregate SSE events into a single non-streaming chat.completion."""
     content, reasoning, tool_calls, finish = [], [], {}, "stop"
     cid, created, usage = "", int(time.time()), None
     for ev in events:
@@ -552,13 +560,13 @@ def aggregate(events: list[dict], model: str) -> dict:
     }
 
 
-# ─────────────────────────── HTTP 服务 ───────────────────────────
+# ──────────────────────────── HTTP server ───────────────────────────
 
 def _log_usage(model: str, usage: dict) -> None:
-    """把每次请求的 token / 积分记到 wbbridge-usage.jsonl，便于核算成本。
+    """Append per-request token / credit usage to wbbridge-usage.jsonl for cost tracking.
 
-    同时兼容 Chat 形状（prompt_tokens/completion_tokens）与 Responses 形状
-    （input_tokens/output_tokens）。
+    Handles both the Chat shape (prompt_tokens/completion_tokens) and the
+    Responses shape (input_tokens/output_tokens).
     """
     path = os.environ.get("WBBRIDGE_USAGE_LOG")
     if not path or not usage:
@@ -588,10 +596,11 @@ def _log_usage(model: str, usage: dict) -> None:
 
 
 class _Server(ThreadingHTTPServer):
-    """只做一件事：客户端断线不打堆栈。
+    """Do one thing: never dump a traceback when a client disconnects.
 
-    断线是常态——用户取消、Codex 在 429 重试风暴里放弃、桌面端切会话——
-    默认 handle_error 会把整片 traceback 刷到 stderr，把真正的错误埋掉。
+    Disconnects are normal -- the user cancels, Codex gives up during a 429 retry
+    storm, the desktop app switches conversations -- and the default
+    handle_error floods stderr with a full traceback, burying the real error.
     """
     daemon_threads = True
     allow_reuse_address = True
@@ -600,7 +609,7 @@ class _Server(ThreadingHTTPServer):
         import sys
         et = sys.exc_info()[0]
         if et is not None and issubclass(et, (ConnectionError, OSError)):
-            log(f"连接中断（{et.__name__}），忽略")
+            log(f"connection dropped ({et.__name__}), ignoring")
             return
         super().handle_error(request, client_address)
 
@@ -609,10 +618,10 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     creds: Credentials = None  # type: ignore
 
-    def log_message(self, fmt, *args):  # 静音默认访问日志
+    def log_message(self, fmt, *args):  # silence the default access log
         log(fmt % args)
 
-    # ── 工具 ──
+    # ── Helpers ──
     def _json(self, obj, status=200):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -621,8 +630,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(body)
-        except (ConnectionError, OSError) as e:      # 客户端已断开（如 429 重试途中取消）
-            log(f"响应写入失败，客户端已断开（{type(e).__name__}）")
+        except (ConnectionError, OSError) as e:      # client already gone (e.g. cancelled mid 429 retry)
+            log(f"write failed, client disconnected ({type(e).__name__})")
 
     def _err(self, status, message, code="upstream_error"):
         self._json({"error": {"message": message, "type": code, "code": status}}, status)
@@ -631,7 +640,7 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
 
-    # ── 路由 ──
+    # ── Routing ──
     def do_GET(self):
         path = self.path.split("?")[0]
         try:
@@ -647,8 +656,9 @@ class Handler(BaseHTTPRequestHandler):
                     "requests_seen": LAST_MODEL.get("count", 0),
                 })
             elif path == "/wb/last-model":
-                # 实际生效的模型只能由这里判定：代理是唯一看到真实 model 字段的一方。
-                # Codex 会话内切换模型不会写回 config.toml，读配置必然读到旧的默认值。
+                # Only this endpoint can report the effective model: the proxy is the one place
+                # that sees the real model field. Switching models inside a Codex session
+                # never writes back to config.toml, so reading the config gives a stale default.
                 d = dict(LAST_MODEL)
                 d["config_model"] = _config_model()
                 d["config_synced"] = (d["config_model"] == LAST_MODEL.get("model"))
@@ -671,10 +681,11 @@ class Handler(BaseHTTPRequestHandler):
                      "max_output_tokens": m.get("maxOutputTokens")}
                     for m in models if m.get("id")
                 ]
-                # Codex 0.15x 的模型目录要求 {"models":[...]}，且条目字段名与 OpenAI
-                # 形状完全不同（slug/display_name/base_instructions…）。缺了它会报
-                # "Model metadata for X not found. Defaulting to fallback metadata"，
-                # TUI 的模型名也会一直停在 loading。两个键都发，各取所需。
+                # Codex 0.15x expects the catalog as {"models":[...]} with entry fields that are
+                # completely different from the OpenAI shape (slug/display_name/
+                # base_instructions...). Without them it logs "Model metadata for X not
+                # found. Defaulting to fallback metadata" and the TUI model name stays on
+                # "loading" forever. Send both keys; each consumer picks what it needs.
                 codex_models = []
                 for i, m in enumerate(models):
                     if not m.get("id"):
@@ -707,9 +718,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/wb/credits":
                 self._json(self.creds.credits())
             else:
-                self._err(404, f"未知路径 {path}", "not_found")
+                self._err(404, f"unknown path {path}", "not_found")
         except UpstreamError as e:
-            log_err(f"上游错误 {e.status}: {upstream_error_text(e.detail)}")
+            log_err(f"upstream error {e.status}: {upstream_error_text(e.detail)}")
             self._err(e.status, e.detail)
         except Exception as e:
             self._err(500, f"{type(e).__name__}: {e}")
@@ -720,12 +731,12 @@ class Handler(BaseHTTPRequestHandler):
             self._responses()
             return
         if path not in ("/v1/chat/completions", "/v1/completions"):
-            self._err(404, f"未知路径 {path}", "not_found")
+            self._err(404, f"unknown path {path}", "not_found")
             return
         try:
             payload = self._body()
         except Exception as e:
-            self._err(400, f"请求体不是合法 JSON: {e}", "invalid_request")
+            self._err(400, f"request body is not valid JSON: {e}", "invalid_request")
             return
 
         model = payload.get("model") or "default-model"
@@ -738,23 +749,23 @@ class Handler(BaseHTTPRequestHandler):
                 for msg in m:
                     c = msg.get("content")
                     if isinstance(c, str) and len(c) > 160:
-                        msg["content"] = c[:160] + f"...<{len(c)} 字>"
+                        msg["content"] = c[:160] + f"...<{len(c)} chars>"
                 if d.get("tools"):
-                    d["tools"] = [f"<{len(d['tools'])} 个工具>" ]
+                    d["tools"] = [f"<{len(d['tools'])} tools>"]
                 with open(os.environ["WBBRIDGE_DUMP"], "a", encoding="utf-8") as fh:
                     fh.write(json.dumps(d, ensure_ascii=False)[:4000] + "\n")
             except Exception:
                 pass
-        log("请求 model=%s stream=%s 顶层字段=%s" % (
+        log("request model=%s stream=%s top-level keys=%s" % (
             model, want_stream, sorted(k for k in payload if k != "messages")))
-        log("消息数=%d 首条 role=%s" % (
+        log("messages=%d first role=%s" % (
             len(payload.get("messages") or []),
             (payload.get("messages") or [{}])[0].get("role")))
 
         try:
             resp, _ = open_upstream(self.creds, payload)
         except UpstreamError as e:
-            log_err(f"上游错误 {e.status}: {upstream_error_text(e.detail)}")
+            log_err(f"upstream error {e.status}: {upstream_error_text(e.detail)}")
             self._err(e.status, e.detail)
             return
         except Exception as e:
@@ -776,16 +787,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
-            # Windows 上客户端取消/断开会抛 ConnectionAbortedError(WinError 10053)，
-            # 只捕 BrokenPipe/Reset 会漏掉它并打出整片堆栈。ConnectionError 是其父类，
-            # 连同 OSError 一起兜住「对端已消失」的各种形态。
+            # On Windows a client cancel/disconnect raises ConnectionAbortedError
+            # (WinError 10053); catching only BrokenPipe/Reset misses it and dumps a
+            # traceback. ConnectionError is its parent, so catching it plus OSError
+            # covers every "peer is gone" shape.
             except (ConnectionError, OSError) as e:
-                log(f"客户端断开（{type(e).__name__}）")
+                log(f"client disconnected ({type(e).__name__})")
             finally:
                 resp.close()
             return
 
-        # 非流式：本地聚合
+        # Non-streaming: aggregate locally
         try:
             events = list(iter_sse(resp))
         finally:
@@ -797,12 +809,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         self.do_POST()
 
-    # ── Responses API（Codex 0.153+ 唯一支持的 wire_api）──
+    # ── Responses API (the only wire_api Codex 0.153+ supports) ──
     def _responses(self) -> None:
         try:
             payload = self._body()
         except Exception as e:
-            self._err(400, f"请求体不是合法 JSON: {e}", "invalid_request")
+            self._err(400, f"request body is not valid JSON: {e}", "invalid_request")
             return
 
         model = payload.get("model") or "default-model"
@@ -813,7 +825,7 @@ class Handler(BaseHTTPRequestHandler):
                 d = dict(payload)
                 d["input"] = f"<{len(payload.get('input') or [])} items>"
                 if d.get("tools"):
-                    d["tools"] = f"<{len(d['tools'])} 个工具>"
+                    d["tools"] = f"<{len(d['tools'])} tools>"
                 with open(os.environ["WBBRIDGE_DUMP"], "a", encoding="utf-8") as fh:
                     fh.write("[responses] " + json.dumps(d, ensure_ascii=False)[:3000] + "\n")
             except Exception:
@@ -822,9 +834,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             chat_payload = wbresponses.request_to_chat(payload)
         except Exception as e:
-            self._err(400, f"请求转换失败: {type(e).__name__}: {e}", "invalid_request")
+            self._err(400, f"request conversion failed: {type(e).__name__}: {e}", "invalid_request")
             return
-        log("responses→chat model=%s 消息数=%d 工具=%d stream=%s" % (
+        log("responses->chat model=%s messages=%d tools=%d stream=%s" % (
             model, len(chat_payload["messages"]), len(chat_payload.get("tools") or []), want_stream))
         if os.environ.get("WBBRIDGE_DUMP"):
             try:
@@ -844,7 +856,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             resp, _ = open_upstream(self.creds, chat_payload)
         except UpstreamError as e:
-            log_err(f"上游错误 {e.status}: {upstream_error_text(e.detail)}")
+            log_err(f"upstream error {e.status}: {upstream_error_text(e.detail)}")
             self._err(e.status, e.detail)
             return
         except Exception as e:
@@ -874,7 +886,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"event: {name}\ndata: {body}\n\n".encode("utf-8"))
                 self.wfile.flush()
         except (ConnectionError, OSError) as e:
-            log(f"客户端断开（{type(e).__name__}）")
+            log(f"client disconnected ({type(e).__name__})")
         finally:
             resp.close()
 
@@ -882,52 +894,54 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> int:
     global _VERBOSE
     wbdiscover.console_encodings()
-    ap = argparse.ArgumentParser(description="WorkBuddy AI → OpenAI 兼容本地代理")
+    ap = argparse.ArgumentParser(description="WorkBuddy AI -> OpenAI compatible local proxy")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8788)
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
     _VERBOSE = args.verbose
 
-    # 预检：把「缺什么、怎么补」直接说清楚，别让新用户对着一条含糊报错猜。
+    # Preflight: spell out what is missing and how to fix it instead of leaving
+    # a new user to guess at a vague error.
     py = sys.executable
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
     except ImportError:
-        print(f"缺少依赖 cryptography（当前解释器：{py}）\n"
-              f"请安装：\"{py}\" -m pip install cryptography", file=sys.stderr)
+        print(f"missing dependency: cryptography (interpreter: {py})\n"
+              f"install it with: \"{py}\" -m pip install cryptography", file=sys.stderr)
         return 3
 
     if not APP_DIR or not os.path.isfile(APP_DIR):
-        print("找不到 WorkBuddy AI 桌面端主程序。\n"
-              "请先安装并登录 WorkBuddy AI 桌面端（国际版），"
-              "或用环境变量指定：WBBRIDGE_APP=<...>\\WorkBuddyAI.exe", file=sys.stderr)
+        print("Could not find the WorkBuddy AI desktop executable.\n"
+              "Install and sign in to the WorkBuddy AI desktop app (international build),"
+              "or point to it with WBBRIDGE_APP=<...>\\WorkBuddyAI.exe", file=sys.stderr)
         return 2
 
     if not AUTH_FILE or not os.path.exists(AUTH_FILE):
-        print("找不到 WorkBuddy AI 凭据文件。\n"
-              "请先启动 WorkBuddy AI 桌面端并登录（登录后凭据会自动写出），"
-              "或用环境变量指定：WBBRIDGE_AUTH_FILE=<...>\\workbuddy-desktop-ai.info",
+        print("Could not find the WorkBuddy AI credential file.\n"
+              "Start the WorkBuddy AI desktop app and sign in (the file is written on login),"
+              "or point to it with WBBRIDGE_AUTH_FILE=<...>\\workbuddy-desktop-ai.info",
               file=sys.stderr)
         return 2
 
-    print(f"桌面端：{APP_DIR}", file=sys.stderr)
-    print(f"凭据：{AUTH_FILE}", file=sys.stderr)
-    print("正在解密 WorkBuddy AI 凭据…", file=sys.stderr)
+    print(f"desktop app: {APP_DIR}", file=sys.stderr)
+    print(f"credentials: {AUTH_FILE}", file=sys.stderr)
+    print("decrypting WorkBuddy AI credentials...", file=sys.stderr)
     try:
         Handler.creds = Credentials()
     except Exception as e:
-        print(f"凭据解密失败：{type(e).__name__}: {e}\n"
-              "常见原因：桌面端未登录、版本升级改了绑定名、或换了机器。",
+        print(f"failed to decrypt credentials: {type(e).__name__}: {e}\n"
+              "Common causes: not signed in, a version update renamed the binding,"
+              "or the credentials came from another machine.",
               file=sys.stderr)
         return 2
-    print(f"就绪 → http://{args.host}:{args.port}/v1   （模型列表 /v1/models，额度 /wb/credits）",
+    print(f"ready -> http://{args.host}:{args.port}/v1   (models: /v1/models, quota: /wb/credits)",
           file=sys.stderr)
     srv = _Server((args.host, args.port), Handler)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
-        print("\n已停止", file=sys.stderr)
+        print("\nstopped", file=sys.stderr)
     return 0
 
 

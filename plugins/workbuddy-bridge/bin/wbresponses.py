@@ -1,13 +1,13 @@
-"""Responses API ⇄ Chat Completions 适配层。
+"""Responses API <-> Chat Completions adaptation layer.
 
-Codex 0.153 起移除了 `wire_api = "chat"`（只认 Responses），而 WorkBuddy 上游
-只提供 Chat Completions。这个模块把两边翻译过来：
+Codex 0.153 dropped `wire_api = "chat"` (Responses only), while the WorkBuddy
+upstream only speaks Chat Completions. This module translates between them:
 
-    入站  POST /v1/responses   (Responses 请求)
-    出站  POST /v2/chat/completions (Chat 请求，由调用方发送)
-    回程  Chat SSE → Responses SSE
+    inbound   POST /v1/responses        (Responses request)
+    outbound  POST /v2/chat/completions (Chat request, sent by the caller)
+    return    Chat SSE -> Responses SSE
 
-只做协议转换，不含任何凭据/网络逻辑。
+Protocol translation only; no credential or network logic lives here.
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ import uuid
 from typing import Any, Iterable
 
 
-# ───────────────────── 请求：Responses → Chat ─────────────────────
+# ───────────────────── Request: Responses -> Chat ─────────────────────
 
 def _content_to_chat(content: Any) -> Any:
-    """把 Responses 的 content parts 折成 Chat 的 content。"""
+    """Flatten Responses content parts into Chat content."""
     if isinstance(content, str):
         return content
     if not isinstance(content, list):
@@ -43,7 +43,7 @@ def _content_to_chat(content: Any) -> Any:
         elif t == "refusal":
             texts.append(p.get("refusal") or "")
     if parts:
-        # 有图：文本作为第一个 part，保持顺序语义
+        # Images present: text goes first as a part, preserving order
         return [{"type": "text", "text": "".join(texts)}] + parts if texts else parts
     return "".join(texts)
 
@@ -56,9 +56,11 @@ def _tools_to_chat(tools: Any) -> list[dict] | None:
         if not isinstance(t, dict):
             continue
         if t.get("type") != "function":
-            # 上游只支持 function 类工具（web_search 等内置工具直接丢弃）
+            # The upstream only supports function tools (built-ins such as
+            # web_search are dropped)
             continue
-        # Responses 把 name/description/parameters 放在顶层；也兼容已嵌套的写法
+        # Responses puts name/description/parameters at the top level; also
+        # accept the already-nested form
         fn = t.get("function") if isinstance(t.get("function"), dict) else t
         if not fn.get("name"):
             continue
@@ -93,9 +95,10 @@ def _effort_of(reasoning: Any) -> str | None:
 
 
 def request_to_chat(payload: dict, *, default_system: str = "You are a helpful assistant.") -> dict:
-    """Responses 请求体 → WorkBuddy 可接受的 Chat 请求体。
+    """Responses request body -> a Chat request body the upstream accepts.
 
-    三条上游硬约束在这里落实：首条必须是 system、不能出现 developer、必须 stream。
+    Three hard upstream constraints are enforced here: the first message must be
+    a system message, `developer` must never appear, and the call must stream.
     """
     systems: list[str] = []
     messages: list[dict] = []
@@ -153,7 +156,7 @@ def request_to_chat(payload: dict, *, default_system: str = "You are a helpful a
                 "content": out,
             })
         elif t == "reasoning":
-            continue  # 思考内容不回灌上游
+            continue  # do not feed reasoning content back upstream
         else:
             continue
     flush_calls()
@@ -185,16 +188,18 @@ def request_to_chat(payload: dict, *, default_system: str = "You are a helpful a
     return chat
 
 
-# ───────────────────── 回程：Chat SSE → Responses SSE ─────────────────────
+# ───────────────────── Return: Chat SSE -> Responses SSE ─────────────────────
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
-# ── system prompt 清洗 ──
-# WorkBuddy 上游按 system prompt 指纹识别客户端，第三方 agent 框架的身份段会被拒
-# （400 code 11128 "Illegal API invocation from an unapproved channel"）。
-# 实测：只替换开头身份段即可放行，其后的行为指令（占 98%）可原样保留。
+# ── system prompt sanitizing ──
+# The upstream fingerprints the client from the system prompt and rejects the
+# identity block of third-party agent harnesses
+# (400 code 11128 "Illegal API invocation from an unapproved channel").
+# Measured: replacing only the leading identity block is enough to pass; the
+# behavioural instructions after it (98% of the text) can stay verbatim.
 _HARNESS_MARKERS = (
     "running in the Codex CLI",
     "open source project led by OpenAI",
@@ -209,14 +214,15 @@ _NEUTRAL_SYSTEM = (
 
 
 def sanitize_system(text: str) -> str:
-    """把可识别为第三方 harness 的开头身份段换成中性描述。"""
+    """Replace a leading identity block that identifies a third-party harness with
+    a neutral description."""
     if not text or not any(m in text for m in _HARNESS_MARKERS):
         return text
     for sep in ("\r\n\r\n# ", "\n\n# ", "\r\n\r\n## ", "\n\n## "):
         i = text.find(sep)
         if i > 0:
             return _NEUTRAL_SYSTEM + text[i:]
-    # 没有标题可用来切分：退化为整段替换
+    # No heading to split on: fall back to replacing everything
     return _NEUTRAL_SYSTEM
 
 
@@ -231,17 +237,19 @@ def _usage_to_responses(usage: dict) -> dict:
         "output_tokens_details": {"reasoning_tokens": reasoning},
         "total_tokens": usage.get("total_tokens") or 0,
     }
-    # WorkBuddy 的积分消耗挂在 usage.credit 上；Responses 标准里没有这个字段，
-    # 但带上它不会影响客户端，却能让我们在代理侧如实记账。
+    # WorkBuddy reports credit spend on usage.credit. The Responses spec has no
+    # such field, but including it does not disturb clients and lets the proxy
+    # account for spend accurately.
     if usage.get("credit") is not None:
         out["credit"] = usage["credit"]
     return out
 
 
 def stream_responses_events(chat_events: Iterable[dict], model: str) -> Iterable[dict]:
-    """Chat 增量事件流 → Responses 事件流（含 event 名）。
+    """Chat delta event stream -> Responses event stream (with event names).
 
-    产出 (event_name, payload) 二元组，由调用方写成 `event:` + `data:` 两行。
+    Yields (event_name, payload) pairs; the caller writes them as `event:` and
+    `data:` lines.
     """
     rid = _new_id("resp")
     created = int(time.time())
@@ -249,8 +257,8 @@ def stream_responses_events(chat_events: Iterable[dict], model: str) -> Iterable
                  "status": "in_progress", "model": model, "output": []}
     yield "response.created", {"type": "response.created", "response": dict(resp_stub)}
 
-    output: list[dict] = []          # 已完成条目
-    text_item: dict | None = None    # 正在写的 message 条目
+    output: list[dict] = []          # completed items
+    text_item: dict | None = None    # message item being written
     text_buf: list[str] = []
     reason_item: dict | None = None
     reason_buf: list[str] = []
@@ -323,7 +331,8 @@ def stream_responses_events(chat_events: Iterable[dict], model: str) -> Iterable
                 if reason_item is None:
                     reason_item = {"type": "reasoning", "id": _new_id("rs"),
                                    "summary": [], "status": "in_progress"}
-                    # Codex 要求先声明条目，再发 summary 分片，否则报
+                    # Codex requires the item to be declared before summary
+                    # deltas, otherwise it reports
                     # "ReasoningSummaryPartAdded without active item"
                     yield ("response.output_item.added",
                            {"type": "response.output_item.added", "output_index": out_index(),
@@ -395,7 +404,7 @@ def stream_responses_events(chat_events: Iterable[dict], model: str) -> Iterable
 
 
 def aggregate_response(chat_events: list[dict], model: str) -> dict:
-    """非流式：把事件流折叠成一个 Responses 响应对象。"""
+    """Non-streaming: fold the event stream into one Responses object."""
     final = None
     for name, ev in stream_responses_events(chat_events, model):
         if name == "response.completed":

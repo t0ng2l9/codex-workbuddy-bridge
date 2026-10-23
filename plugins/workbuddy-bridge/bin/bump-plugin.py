@@ -1,15 +1,18 @@
-"""给插件清单打一个 cachebuster 版本号。
+"""Stamp a cachebuster version onto the plugin manifest.
 
-Codex 把插件按版本号物化到 `plugins/cache/<市场>/<插件>/<版本>/`，**版本号不变就不会重新读取**。
-所以本地改完插件要重装时，先跑这个脚本把 `version` 换成一个单调递增的 semver：
+Codex materializes a plugin into `plugins/cache/<market>/<plugin>/<version>/` and
+**will not re-read it while the version is unchanged**. So after editing the
+plugin locally, run this first to move `version` to a monotonically increasing
+semver:
 
     1.2.2  ->  1.2.2-20261013120000
 
-用的是 semver 的 prerelease 段，所以对解析仍然合法；时间戳取 UTC，保证单调递增。
+It uses the semver prerelease segment, so the result still parses; the timestamp
+is UTC, which keeps it monotonic.
 
-用法：
-    python bump-plugin.py <插件目录>
-    python bump-plugin.py <插件目录> --set 2.0.0     # 手动指定（发布时用）
+Usage:
+    python bump-plugin.py <plugin-dir>
+    python bump-plugin.py <plugin-dir> --set 2.0.0     # explicit (for releases)
 """
 from __future__ import annotations
 
@@ -20,13 +23,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# 与官方 validator 一致的严格 semver
+# Strict semver, matching the official validator
 SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
-# 已经带过时间戳后缀，替换掉而不是叠加
+# Already carries a timestamp suffix: replace it instead of stacking another
 CACHEBUSTER_RE = re.compile(r"-\d{14}$")
 
 
@@ -35,7 +38,7 @@ def strip_cachebuster(version: str) -> str:
 
 
 def console_encodings() -> None:
-    """按控制台代码页重配输出，避免中文乱码（见 wbdiscover 的说明）。"""
+    """Match stdout/stderr encoding to the console code page (see wbdiscover)."""
     if sys.platform != "win32":
         return
     try:
@@ -53,26 +56,26 @@ def console_encodings() -> None:
 
 def main() -> int:
     console_encodings()
-    ap = argparse.ArgumentParser(description="给 Codex 插件打 cachebuster 版本号")
-    ap.add_argument("plugin_path", help="插件根目录（含 .codex-plugin/plugin.json）")
+    ap = argparse.ArgumentParser(description="Stamp a cachebuster version on a Codex plugin")
+    ap.add_argument("plugin_path", help="Plugin root directory (contains .codex-plugin/plugin.json)")
     ap.add_argument("--set", metavar="VERSION",
-                    help="显式指定版本（发布时用），而不是追加时间戳")
+                    help="Explicit version (for releases) instead of appending a timestamp")
     a = ap.parse_args()
 
     manifest_path = Path(a.plugin_path).expanduser() / ".codex-plugin" / "plugin.json"
     if not manifest_path.is_file():
-        print(f"找不到插件清单：{manifest_path}", file=sys.stderr)
+        print(f"Plugin manifest not found: {manifest_path}", file=sys.stderr)
         return 1
 
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
-        print(f"读不了插件清单：{e}", file=sys.stderr)
+        print(f"Cannot read plugin manifest: {e}", file=sys.stderr)
         return 1
 
     old = str(manifest.get("version") or "")
     if SEMVER_RE.fullmatch(old) is None:
-        print(f"现有 version 不是严格 semver，拒绝改：{old!r}", file=sys.stderr)
+        print(f"Existing version is not strict semver, refusing to change: {old!r}", file=sys.stderr)
         return 1
 
     if a.set:
@@ -82,7 +85,7 @@ def main() -> int:
         new = f"{strip_cachebuster(old)}-{stamp}"
 
     if SEMVER_RE.fullmatch(new) is None:
-        print(f"新版本号不是严格 semver：{new!r}", file=sys.stderr)
+        print(f"New version is not strict semver: {new!r}", file=sys.stderr)
         return 1
 
     manifest["version"] = new
@@ -92,7 +95,7 @@ def main() -> int:
 
     name = manifest.get("name", "?")
     print(f"{name}: {old} -> {new}")
-    print("接着重装：codex plugin add " + f"{name}@<市场名>")
+    print("Now reinstall: codex plugin add " + f"{name}@<market>")
     return 0
 
 

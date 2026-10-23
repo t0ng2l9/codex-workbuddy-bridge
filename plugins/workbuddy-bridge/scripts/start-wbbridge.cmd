@@ -1,10 +1,13 @@
 @echo off
-rem 启动 WorkBuddy -> Codex 本地代理（平时不需要，codex-wbb.cmd 会自动拉起）
-rem 本文件必须保持 GBK(cp936) + CRLF。
+rem Starts the local WorkBuddy -> Codex proxy. Usually not needed: codex-wbb.cmd
+rem starts it on demand.
+rem Keep this file ASCII/GBK + CRLF.
 setlocal
 call "%~dp0_findpy.cmd"
 if not defined PYEXE (
-    echo [wbb] 找不到 python 解释器。请安装 Python 3.10+，或设置 WBBRIDGE_PYTHON。
+    echo [wbb] Python not found. Install Python 3.10+ ^(tick "Add python.exe to PATH"^),
+    echo       or set WBBRIDGE_PYTHON to a full python.exe path.
+    pause
     exit /b 1
 )
 "%PYEXE%" "%~dp0..\bin\wbproxy.py" %*

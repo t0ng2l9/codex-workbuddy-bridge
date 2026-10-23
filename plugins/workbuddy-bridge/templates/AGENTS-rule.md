@@ -1,21 +1,26 @@
-<!-- 追加到 %USERPROFILE%\.codex\AGENTS.md（全局指令，每个会话都会注入） -->
+<!-- Append to %USERPROFILE%\.codex\AGENTS.md (global instructions, injected into every session) -->
 
 <!-- BEGIN workbuddy-bridge -->
-## 回答「当前模型」必须现查（不得凭上下文）
+## Always look up the current model, never answer from context
 
-被问到「当前模型 / 现在用的什么模型 / which model / 换模型了吗」等身份类问题时：
+When asked an identity-style question such as "which model are you", "what model
+am I using now", or "did you switch models":
 
-**必须现场执行以下命令取数，禁止依据对话历史或记忆回答。**
+**Run the command below to get the data. Do not answer from conversation history
+or memory.**
 
 ```bash
 curl -s http://127.0.0.1:8788/wb/last-model
 ```
 
-规则：
+Rules:
 
-- 报告 `model` 字段（代理实际转发给上游的模型，唯一权威）。
-- `config_model` 只是「新建会话的默认值」，不等于当前会话在用的模型。
-- **模型无法内省自己的身份**：上下文里出现过的模型名、你自己上一轮的回答，全部不可信——
-  用户可以在会话中途切换模型，历史消息里没有任何痕迹。
-- 每次都重新执行上面的命令，不要复用本会话早先拿到的值。
+- Report the `model` field. It is the model the proxy actually forwarded upstream,
+  and the only authority.
+- `config_model` is only the default for new sessions; it is not what the current
+  session is using.
+- **A model cannot introspect its own identity.** Model names that appear in the
+  context, and your own previous answers, are all unreliable: the user can switch
+  models mid-session and nothing in the history shows it.
+- Re-run the command every time. Never reuse a value obtained earlier in the session.
 <!-- END workbuddy-bridge -->

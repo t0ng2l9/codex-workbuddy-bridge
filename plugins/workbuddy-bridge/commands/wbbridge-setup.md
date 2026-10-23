@@ -1,56 +1,63 @@
 ---
-description: 把 WorkBuddy 接入 Codex（安装 / 修复 / 重装）
+description: Connect WorkBuddy to Codex (install / repair / reinstall)
 argument-hint: "[--skip-doctor] [--no-watch] [--no-skill] [--no-agents-rule]"
 allowed-tools: [Bash, Read, Glob, Grep]
 ---
 
-# 安装 WorkBuddy → Codex 接入
+# Install the WorkBuddy to Codex bridge
 
-用户调用了本命令，参数：`$ARGUMENTS`
+The user invoked this command with arguments: `$ARGUMENTS`
 
-## 步骤
+## Steps
 
-1. 先做体检，把结果如实报给用户：
-
-```cmd
-python "<插件根>\bin\setup.py" doctor
-```
-
-2. 若体检标了 `!!`，按提示补齐后再继续（缺 Python/cryptography、未登录 WorkBuddy 桌面端、
-   缺 Codex 都属要先解决的项）。**不要**自己下载或安装 WorkBuddy 桌面端 —— 让用户自己装并登录。
-
-3. 体检通过后安装：
+1. Run the environment check first and report the result honestly:
 
 ```cmd
-python "<插件根>\bin\setup.py" install $ARGUMENTS
+python "<plugin root>\bin\setup.py" doctor
 ```
 
-安装会一并做这些（幂等）：provider 段、profile、模型目录、技能、AGENTS 规则，
-以及**代理看护的登录自启**（想让代理按插件启停自动开关，就必须这一步）。
+2. If the check flags anything with `!!`, fix that before continuing (missing
+   Python/cryptography, not signed in to the WorkBuddy desktop app, and a missing
+   Codex all have to be resolved first). **Do not** download or install the
+   WorkBuddy desktop app yourself - have the user install and sign in.
 
-4. 跑 status 与看护判定确认：
+3. Once the check passes, install:
 
 ```cmd
-python "<插件根>\bin\setup.py" status
-python "<插件根>\bin\watch_plugin.py" --status
+python "<plugin root>\bin\setup.py" install $ARGUMENTS
 ```
 
-5. 告诉用户两件事：
+The install also writes the provider block, the profile, the model catalog, the
+skill, the AGENTS rule and the **watchdog logon autostart** (needed if the proxy
+should follow the plugin enabled state).
 
-   - 怎么开始用：`codex --profile wbb`，或者桌面端**新建会话**（旧会话逐会话绑定 provider，不跟随）。
-   - **建议信任 hook**，否则「新会话自动拉起代理」不生效：
-     桌面端 **设置 → Hooks → From Plugins → 本插件 SessionStart → Trust all**
-     （或 TUI 新会话时选 *Trust all and continue*；自动化用
-     `codex exec --dangerously-bypass-hook-trust`）。
-     不信任也能用 —— 看护会兜底。
+4. Confirm with status and the watchdog verdict:
 
-## 注意
+```cmd
+python "<plugin root>\bin\setup.py" status
+python "<plugin root>\bin\watch_plugin.py" --status
+```
 
-- `<插件根>` 是插件被安装后的真实目录，用这个命令找到它：
+5. Tell the user two things:
+
+   - How to start: `codex --profile wbb`, or **start a new session** in the
+     desktop app (old sessions are bound to their provider per session and do not
+     follow).
+   - **Trusting the hook is recommended**, otherwise a new session will not start
+     the proxy: desktop app **Settings -> Hooks -> From Plugins -> this plugin
+     SessionStart -> Trust all** (or pick *Trust all and continue* in a new TUI
+     session; for automation use `codex exec --dangerously-bypass-hook-trust`).
+     It also works untrusted - the watchdog covers it.
+
+## Notes
+
+- `<plugin root>` is the real directory after installation; find it with:
   `dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge"`
-- 安装是幂等的：重复运行不会改动已就绪的内容，也不会累积空行。
-- 不要修改 `config.toml` 里本插件以外的段落。
-- 如果安装失败（退出码非 0），把 `!!` 那行原样贴给用户，不要自己猜。
-- 改了插件内容要先升版本再重装（Codex 按版本号缓存）：
-  `python "<插件根>\bin\bump-plugin.py" "<插件目录>"` 然后
-  `codex plugin add workbuddy-bridge@wbbridge`。
+- The install is idempotent: re-running never changes what is already in place
+  and never accumulates blank lines.
+- Do not modify any section of `config.toml` other than this plugin own block.
+- If the install fails (non-zero exit), quote the `!!` line verbatim; do not guess.
+- After changing plugin content, bump the version before reinstalling (Codex
+  caches by version):
+  `python "<plugin root>\bin\bump-plugin.py" "<plugin dir>"` then
+  `codex plugin add workbuddy-bridge@wbbridge`.

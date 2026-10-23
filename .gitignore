@@ -4,5 +4,6 @@ __pycache__/
 dev/_work/
 .claude/
 
-# 本地诊断脚本（逆向分析/指纹定位），不随仓库发布
+# Local diagnostics (reverse-engineering notes / fingerprint bisecting),
+# never published
 plugins/workbuddy-bridge/dev/

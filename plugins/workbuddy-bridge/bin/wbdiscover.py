@@ -1,9 +1,11 @@
-"""路径与运行时自动发现。
+"""Path and runtime auto-discovery.
 
-让这个包能在**任意机器**上跑起来：WorkBuddy 桌面端装在哪、凭据文件叫什么、
-Python 和 Codex 在不在 PATH 里，一律自动找，不写死。
+Makes this package work on **any machine**: where the WorkBuddy desktop app is
+installed, what the credential file is called, whether Python and Codex are on
+PATH -- all discovered at runtime, nothing hard-coded.
 
-所有发现函数都遵循同一优先级：**环境变量覆盖 > 自动探测**。
+Every discovery function follows the same priority:
+**environment variable override > automatic probe**.
 """
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-# ── 环境变量名（同时被 wbproxy / setup / 启动脚本读取）──
+# ── Environment variable names (read by wbproxy / setup / launcher scripts) ──
 ENV_APP = "WBBRIDGE_APP"
 ENV_AUTH = "WBBRIDGE_AUTH_FILE"
 ENV_PYTHON = "WBBRIDGE_PYTHON"
@@ -22,7 +24,8 @@ ENV_CODEX = "WBBRIDGE_CODEX"
 APP_EXE_NAMES = ("WorkBuddyAI.exe", "CodeBuddy.exe", "WorkBuddy.exe")
 APP_DIR_NAMES = ("WorkBuddyAI", "WorkBuddy AI", "CodeBuddy", "CodeBuddyAI")
 
-# 凭据文件名：国际版优先，国内版兜底（两者可能同时存在，且属于不同账号）
+# Credential file names: international build first, domestic build as fallback
+# (both can exist at once, and they belong to different accounts)
 AUTH_NAMES = ("workbuddy-desktop-ai.info", "workbuddy-desktop.info")
 
 
@@ -32,16 +35,19 @@ def _env(name: str) -> str | None:
 
 
 def console_encodings() -> None:
-    """让 stdout/stderr 的编码匹配控制台代码页，避免中文乱码。
+    """Match stdout/stderr encoding to the console code page.
 
-    有些环境（例如某些 IDE / Agent 宿主）会设 PYTHONUTF8=1，Python 便输出 UTF-8，而 Windows 控制台
-    默认是 cp936，中文就变成乱码。这里统一按**控制台输出代码页**重配，于是：
+    Some environments (certain IDEs / agent hosts) set PYTHONUTF8=1, so Python
+    emits UTF-8 while the Windows console defaults to cp936 -- non-ASCII text
+    turns into mojibake. Reconfigure both streams to the **console output code
+    page** instead, so:
 
-      - 终端里显示正常；
-      - 重定向到文件时也和 .cmd 自身的中文（cmd 用 OEM 代码页输出）保持一致，
-        不会出现半截 cp936、半截 UTF-8 的混合文件。
+      - the terminal displays correctly;
+      - redirected output matches the .cmd files' own encoding (cmd writes in the
+        OEM code page), with no half-cp936, half-UTF-8 mixed file.
 
-    不依赖 chcp —— 改 chcp 会打断正在执行的 .cmd 里 cp936 编码的中文。
+    Deliberately does not call chcp -- that would break the cp936-encoded .cmd
+    that is currently running.
     """
     if sys.platform != "win32":
         return
@@ -58,9 +64,10 @@ def console_encodings() -> None:
             pass
 
 
-# ── WorkBuddy 桌面端可执行文件 ──────────────────────────────
+# ── WorkBuddy desktop executable ────────────────────────────
 def _app_from_registry() -> str | None:
-    """NSIS 安装会写卸载项，UninstallString 里的目录就是安装目录。"""
+    """The NSIS installer writes an uninstall entry; its UninstallString points at
+    the install directory."""
     if sys.platform != "win32":
         return None
     ps = (
@@ -81,7 +88,7 @@ def _app_from_registry() -> str | None:
         line = line.strip().strip('"')
         if not line:
             continue
-        # 形如  "D:\...\WorkBuddyAI\Uninstall WorkBuddyAI.exe" /currentuser
+        # e.g.  "D:\...\WorkBuddyAI\Uninstall WorkBuddyAI.exe" /currentuser
         path = line.split('"')[0] if line.startswith('"') else line
         path = path.split(" /")[0].strip().strip('"')
         d = Path(path).parent
@@ -93,7 +100,7 @@ def _app_from_registry() -> str | None:
 
 
 def _app_from_process() -> str | None:
-    """桌面端正在跑的话，直接问它。"""
+    """If the desktop app is running, just ask it."""
     if sys.platform != "win32":
         return None
     names = "' or name='".join(n.replace(".exe", ".exe") for n in APP_EXE_NAMES)
@@ -128,7 +135,7 @@ def _app_from_common_paths() -> str | None:
                 base = Path(root) / sub / d if sub else Path(root) / d
                 if base not in seen:
                     seen.append(base)
-    # 非系统盘上的同名目录（很多人装到 D:）
+    # Same directory names on non-system drives (many people install to D:)
     for drive in "CDEFGH":
         for d in APP_DIR_NAMES:
             seen.append(Path(f"{drive}:/Programs/{d}"))
@@ -145,10 +152,11 @@ def _app_from_common_paths() -> str | None:
 
 
 def find_app() -> str | None:
-    """返回 WorkBuddy 桌面端主程序路径；找不到返回 None。
+    """Return the WorkBuddy desktop executable path, or None if not found.
 
-    显式设置了 WBBRIDGE_APP 就原样采信（哪怕路径不存在）——这样写错路径时
-    体检会如实报「找不到」，而不是悄悄回退到自动发现、让人以为配置生效了。
+    An explicit WBBRIDGE_APP is taken at face value even if the path does not
+    exist: a typo then shows up honestly as "not found" in the doctor output
+    instead of silently falling back to auto-discovery and looking like it worked.
     """
     override = _env(ENV_APP)
     if override:
@@ -160,19 +168,19 @@ def find_app() -> str | None:
     return None
 
 
-# ── 凭据文件 ────────────────────────────────────────────────
+# ── Credential file ─────────────────────────────────────────
 def _auth_dirs() -> list[Path]:
     la = os.environ.get("LOCALAPPDATA")
     out: list[Path] = []
     if la:
         out.append(Path(la) / "CodeBuddyExtension" / "Data" / "Public" / "auth")
-    # 部分版本把数据放在用户目录下
+    # Some versions keep the data under the user profile
     out.append(Path.home() / ".codebuddy" / "auth")
     return out
 
 
 def find_auth_files() -> list[str]:
-    """列出所有可用的凭据文件（国际版在前）。"""
+    """List every usable credential file (international build first)."""
     found: list[str] = []
     for d in _auth_dirs():
         for name in AUTH_NAMES:
@@ -193,7 +201,7 @@ def find_auth_file() -> str | None:
     return files[0] if files else None
 
 
-# ── Python 解释器（供 .cmd 启动脚本用）────────────────────
+# ── Python interpreter (used by the .cmd launchers) ─────────
 def _python_candidates() -> list[str]:
     la = os.environ.get("LOCALAPPDATA", "")
     pf = os.environ.get("ProgramFiles", "")
@@ -208,8 +216,9 @@ def _python_candidates() -> list[str]:
         os.path.join(pf, "Python311", "python.exe"),
         os.path.join(pf, "Python310", "python.exe"),
     ]
-    # Codex 桌面端自带一份 Python（3.12 + cryptography），没装系统 Python 的机器靠它也能跑。
-    # 路径形如 ~/.cache/codex-runtimes/<runtime>/dependencies/python/python.exe
+    # The Codex desktop app ships a Python (3.12 + cryptography), so machines
+    # without a system Python still work.
+    # Path looks like ~/.cache/codex-runtimes/<runtime>/dependencies/python/python.exe
     for base, pat in ((home / ".cache" / "codex-runtimes", "*/dependencies/python/python.exe"),
                       (home / ".codex" / "runtimes", "*/python/python.exe")):
         try:
@@ -220,19 +229,20 @@ def _python_candidates() -> list[str]:
 
 
 def find_python() -> str | None:
-    """返回一个能用的 python 解释器（优先带 cryptography 的）。"""
+    """Return a usable python interpreter, preferring one with cryptography."""
     override = _env(ENV_PYTHON)
     if override and Path(override).is_file():
         return override
     cands = [c for c in _python_candidates() if Path(c).is_file()]
-    # PATH 上的 python / py
+    # python / python3 on PATH
     for name in ("python.exe", "python3.exe"):
         p = shutil.which(name)
-        # 跳过 WindowsApps 里的「应用执行别名」存根：它只是个转发器，
-        # 未装商店版 Python 时一跑就弹商店，且 import cryptography 必然失败。
+        # Skip the WindowsApps "app execution alias" stub: it is only a forwarder,
+        # so without the Store build of Python it opens the Store, and importing
+        # cryptography always fails.
         if p and "\\WindowsApps\\" not in p:
             cands.append(p)
-    # 优先挑能 import cryptography 的
+    # Prefer one that can import cryptography
     for c in cands:
         if _has_crypto(c):
             return c
@@ -249,7 +259,7 @@ def _has_crypto(python: str) -> bool:
 
 
 def has_crypto(python: str) -> tuple[bool, str]:
-    """返回 (是否有 cryptography, 版本或错误)。"""
+    """Return (has cryptography, version or error)."""
     try:
         r = subprocess.run([python, "-c",
                             "import sys, cryptography; "
@@ -262,12 +272,13 @@ def has_crypto(python: str) -> tuple[bool, str]:
         return False, str(e)[:120]
 
 
-# ── Codex 可执行文件 ────────────────────────────────────────
+# ── Codex executable ────────────────────────────────────────
 def find_codex() -> str | None:
-    """返回 codex 的 .cmd/.exe 路径。
+    """Return the path of the codex .cmd/.exe.
 
-    有些环境 PATH 上排在前面的 codex 是 IDE 自带的构建，exec 会失败。所以默认优先
-    npm 全局安装（用户自己装的那份），再退回 PATH。
+    In some environments the codex that comes first on PATH is an IDE-bundled
+    build whose exec fails. So prefer the npm global install (the one the user
+    installed), then fall back to PATH.
     """
     override = _env(ENV_CODEX)
     if override:
@@ -286,9 +297,9 @@ def find_codex() -> str | None:
     return None
 
 
-# ── 一次性体检 ──────────────────────────────────────────────
+# ── One-shot health check ───────────────────────────────────
 def diagnose(port: int = 8788) -> list[tuple[str, bool, str]]:
-    """返回 [(检查项, 是否通过, 说明)]，供 setup.py doctor 打印。"""
+    """Return [(check name, passed, detail)] for setup.py doctor to print."""
     out: list[tuple[str, bool, str]] = []
 
     # Python
@@ -301,35 +312,35 @@ def diagnose(port: int = 8788) -> list[tuple[str, bool, str]]:
             ver_ok = (major, minor) >= (3, 10)
         except ValueError:
             ver_ok = False
-        out.append(("Python ≥3.10", ver_ok, py if ver_ok else f"{py}（版本 {ver} 偏低）"))
-        out.append((f"cryptography", ok, info if ok else f"缺失 —— {info}"))
+        out.append(("Python >=3.10", ver_ok, py if ver_ok else f"{py} (version {ver} is too old)"))
+        out.append(("cryptography", ok, info if ok else f"missing -- {info}"))
     else:
-        out.append(("Python ≥3.10", False, "找不到 python，请安装 Python 3.10+ 并勾选 Add to PATH"))
-        out.append(("cryptography", False, "跳过（没有 python）"))
+        out.append(("Python >=3.10", False, "python not found; install Python 3.10+ and tick Add to PATH"))
+        out.append(("cryptography", False, "skipped (no python)"))
 
-    # WorkBuddy 桌面端
+    # WorkBuddy desktop app
     app = find_app()
-    out.append(("WorkBuddy 桌面端", bool(app), app or "找不到，请先安装 WorkBuddy AI 桌面端（国际版）"))
+    out.append(("WorkBuddy desktop app", bool(app), app or "not found; install the WorkBuddy AI desktop app (international build)"))
 
-    # 凭据
+    # Credentials
     auths = find_auth_files()
     if auths:
-        out.append(("登录凭据", True, auths[0] + (f"（另有 {len(auths)-1} 份备用）" if len(auths) > 1 else "")))
+        out.append(("credentials", True, auths[0] + (f" ({len(auths)-1} more available)" if len(auths) > 1 else "")))
     else:
-        out.append(("登录凭据", False, "找不到凭据文件，请先启动 WorkBuddy 桌面端并登录"))
+        out.append(("credentials", False, "credential file not found; start the WorkBuddy desktop app and sign in"))
 
     # Codex
     cx = find_codex()
-    out.append(("Codex CLI", bool(cx), cx or "找不到 codex，请安装：npm i -g @openai/codex"))
+    out.append(("Codex CLI", bool(cx), cx or "codex not found; install with npm i -g @openai/codex"))
 
-    # 端口
+    # Port
     try:
         import socket
         with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-            busy = "已被占用（可能是本代理已在跑）"
-            out.append((f"端口 {port}", True, busy))
+            busy = "already in use (possibly this proxy already running)"
+            out.append((f"port {port}", True, busy))
     except OSError:
-        out.append((f"端口 {port}", True, "空闲"))
+        out.append((f"port {port}", True, "free"))
 
     return out
 
@@ -337,7 +348,7 @@ def diagnose(port: int = 8788) -> list[tuple[str, bool, str]]:
 def main() -> int:
     import argparse
     console_encodings()
-    ap = argparse.ArgumentParser(description="路径与运行时自动发现")
+    ap = argparse.ArgumentParser(description="Path and runtime auto-discovery")
     ap.add_argument("what", nargs="?", default="all",
                     choices=["app", "auth", "python", "codex", "all", "doctor"])
     ap.add_argument("--port", type=int, default=8788)

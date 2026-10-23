@@ -1,22 +1,26 @@
-"""按插件的启用状态看护本地代理：插件激活则代理在跑，未激活则停掉代理。
+"""Watch the local proxy based on the plugin's enabled state: active plugin -> proxy running.
 
-为什么需要它：Codex 的 hook 只在**会话开始**时触发一次，管不了三种情况 ——
-会话进行中代理挂掉、机器重启后还没开会话、压根不用 Codex 时。这个看护进程补上，
-判据直接取自 Codex 的插件状态，所以“激活/停用插件”就等于“开关代理”。
+Why this exists: a Codex hook fires once at **session start**, so it cannot handle
+three cases -- the proxy dying mid-session, the machine rebooting before any
+session starts, or not using Codex at all. This watchdog fills that gap; it reads
+the state straight from Codex, so "enable/disable the plugin" means "start/stop
+the proxy".
 
-判据（两者同时成立才算激活）：
-  1. config.toml 里 `[plugins."<name>@<market>"]` 的 `enabled` 为 true（或该插件段存在且未显式关掉）
-  2. 插件已安装（cache 目录下有产物）
+Active requires both:
+  1. `enabled` is true for `[plugins."<name>@<market>"]` in config.toml (or the
+     block exists and was never explicitly disabled)
+  2. the plugin is actually installed (artifacts exist under the cache dir)
 
-代理只认「本包起的那个」：停之前会核对进程命令行里是否含本包的 wbproxy.py，
-不会误杀端口上的其它程序。
+The proxy only manages **its own** process: before stopping anything it checks
+that the command line contains this package's wbproxy.py, so unrelated programs
+on the port are never killed.
 
-用法：
-    python watch_plugin.py                    常驻看护（默认 5 秒一轮）
-    python watch_plugin.py --once             只对账一次（测试用）
-    python watch_plugin.py --status           打印当前判定，不改动任何东西
-    python watch_plugin.py --install-autostart    装登录自启（计划任务）
-    python watch_plugin.py --remove-autostart     移除登录自启
+Usage:
+    python watch_plugin.py                    run the watchdog (5 s poll by default)
+    python watch_plugin.py --once             reconcile once (for testing)
+    python watch_plugin.py --status           print the current verdict, change nothing
+    python watch_plugin.py --install-autostart    install logon autostart
+    python watch_plugin.py --remove-autostart     remove logon autostart
 """
 from __future__ import annotations
 
@@ -53,7 +57,7 @@ def _utf8() -> None:
 
 
 def log_err(*a) -> None:
-    """状态变化与错误，**永远记录**（照 wbproxy 的分法：流水才该静音）。"""
+    """State changes and errors, **always logged** (same split as wbproxy: only traces are silenced)."""
     line = " ".join(str(x) for x in a)
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     try:
@@ -78,31 +82,31 @@ def config_path() -> Path:
     return Path(os.environ.get("WBBRIDGE_CODEX_CONFIG") or (codex_home() / "config.toml"))
 
 
-# ── 判据 1：config.toml 里的插件启用位 ────────────────────────
+# ── Rule 1: the plugin enable flag in config.toml ───────────
 def plugin_enabled(cfg: Path | None = None) -> tuple[bool, str]:
-    """返回 (是否激活, 说明)。缺 config 或没有该插件段都算未激活。"""
+    """Return (active, reason). A missing config or a missing plugin block counts as inactive."""
     cfg = cfg or config_path()
     if not cfg.is_file():
-        return False, f"找不到配置 {cfg}"
+        return False, f"config not found: {cfg}"
     try:
         import tomllib
         with open(cfg, "rb") as fh:
             data = tomllib.load(fh)
     except Exception as e:
-        return False, f"解析配置失败：{type(e).__name__}: {e}"
+        return False, f"failed to parse the config: {type(e).__name__}: {e}"
 
     plugins = data.get("plugins") or {}
     key = f"{PLUGIN_NAME}@{MARKETPLACE}"
     if key not in plugins:
-        return False, f"配置里没有 [{key}]（插件未安装或被移除）"
+        return False, f"no [{key}] in the config (plugin not installed or removed)"
     entry = plugins.get(key) or {}
-    enabled = entry.get("enabled", True)      # 段在但没写 enabled → 视为启用（与 Codex 默认一致）
+    enabled = entry.get("enabled", True)      # block present without enabled -> treated as enabled (Codex default)
     if enabled:
         return True, f"[{key}] enabled=true"
-    return False, f"[{key}] enabled=false（已在 Codex 里停用）"
+    return False, f"[{key}] enabled=false (disabled in Codex)"
 
 
-# ── 判据 2：插件确实装在盘上 ─────────────────────────────────
+# ── Rule 2: the plugin is really on disk ────────────────────
 def cache_root() -> Path:
     return codex_home() / "plugins" / "cache" / MARKETPLACE / PLUGIN_NAME
 
@@ -110,11 +114,11 @@ def cache_root() -> Path:
 def plugin_installed() -> tuple[bool, str]:
     root = cache_root()
     if not root.is_dir():
-        return False, f"插件缓存不存在：{root}"
+        return False, f"plugin cache does not exist: {root}"
     versions = sorted((d for d in root.iterdir() if d.is_dir()), key=lambda p: p.name)
     if not versions:
-        return False, f"插件缓存为空：{root}"
-    return True, f"已安装版本 {versions[-1].name}"
+        return False, f"plugin cache is empty: {root}"
+    return True, f"installed version {versions[-1].name}"
 
 
 def is_active(cfg: Path | None = None) -> tuple[bool, str]:
@@ -124,10 +128,10 @@ def is_active(cfg: Path | None = None) -> tuple[bool, str]:
     ok2, why2 = plugin_installed()
     if not ok2:
         return False, why2
-    return True, f"激活（{why1}；{why2}）"
+    return True, f"active ({why1}; {why2})"
 
 
-# ── 代理进程：识别、启动、停止 ───────────────────────────────
+# ── Proxy process: identify, start, stop ────────────────────
 def _netstat_pids(p: int) -> list[str]:
     try:
         out = subprocess.run(["netstat", "-ano"], capture_output=True, timeout=60).stdout
@@ -156,13 +160,13 @@ def proxy_running(p: int | None = None) -> tuple[bool, str]:
     p = p or port()
     try:
         with socket.create_connection(("127.0.0.1", p), timeout=0.5):
-            return True, "端口在监听"
+            return True, "port is listening"
     except OSError:
-        return False, "端口未监听"
+        return False, "port is not listening"
 
 
 def our_pids(p: int | None = None) -> list[str]:
-    """只听我们 8788 上、且命令行含本包 wbproxy 的进程 —— 不碰别人的程序。"""
+    """Only processes on our port whose command line contains this package's wbproxy -- touch nothing else."""
     p = p or port()
     out = []
     for pid in _netstat_pids(p):
@@ -174,22 +178,23 @@ def our_pids(p: int | None = None) -> list[str]:
 def start_proxy(p: int | None = None) -> bool:
     p = p or port()
     if not PROXY.is_file():
-        log_err(f"启动失败：找不到 {PROXY}")
+        log_err(f"start failed: cannot find {PROXY}")
         return False
     logf = Path(tempfile.gettempdir()) / "wbbridge-proxy.log"
     try:
-        # 见 wbspawn：venv 的 python.exe 是 uv 存根，转发不传 flags → 真实进程弹控制台。
+        # See wbspawn: a venv python.exe is a uv stub that drops the flags, so the real
+        # process pops up a console.
         wbspawn.spawn_detached([wbspawn.no_console_python(), str(PROXY), "--port", str(p)],
                                log=logf, cwd=str(PLUGIN_ROOT))
     except OSError as e:
-        log_err(f"启动代理失败：{e}")
+        log_err(f"failed to start the proxy: {e}")
         return False
     for _ in range(40):
         time.sleep(0.5)
         if proxy_running(p)[0]:
-            log_err(f"代理已启动 → http://127.0.0.1:{p}/v1")
+            log_err(f"proxy started -> http://127.0.0.1:{p}/v1")
             return True
-    log_err(f"代理启动后 20 秒仍未就绪（日志 {logf}）")
+    log_err(f"proxy still not ready 20s after start (log {logf})")
     return False
 
 
@@ -202,18 +207,18 @@ def stop_proxy(p: int | None = None) -> bool:
         try:
             subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True, timeout=60)
         except (OSError, subprocess.SubprocessError) as e:
-            log_err(f"结束进程 {pid} 失败：{e}")
+            log_err(f"failed to kill process {pid}: {e}")
     deadline = time.time() + 10
     while time.time() < deadline:
         time.sleep(0.4)
         if not proxy_running(p)[0]:
-            log_err(f"插件未激活 → 已停止代理（PID {', '.join(pids)}）")
+            log_err(f"plugin inactive -> proxy stopped (PID {', '.join(pids)})")
             return True
-    log_err(f"停止代理超时（PID {', '.join(pids)}）")
+    log_err(f"timed out stopping the proxy (PID {', '.join(pids)})")
     return False
 
 
-# ── 单实例 ───────────────────────────────────────────────────
+# ── Single instance ─────────────────────────────────────────
 def _pid_alive(pid: int) -> bool:
     try:
         subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
@@ -229,10 +234,12 @@ def _pid_alive(pid: int) -> bool:
 
 
 def acquire_lock() -> bool:
-    """抢单实例锁。
+    """Take the single-instance lock.
 
-    用 O_CREAT|O_EXCL 原子创建 —— 上一版是「先看存在、再写」，两个进程同时启动时
-    都能通过检查，于是并存了两个看护（实测踩到）。锁里记 pid，只在原持有者已死时才清理。
+    Created atomically with O_CREAT|O_EXCL -- an earlier version checked for
+    existence and then wrote, so two processes starting at once both passed the
+    check and two watchdogs ran side by side (measured). The lock records a pid
+    and is only cleared when the original holder is dead.
     """
     for _ in range(2):
         try:
@@ -241,7 +248,7 @@ def acquire_lock() -> bool:
                 fh.write(str(os.getpid()))
             return True
         except FileExistsError:
-            # 锁在：看持有者是否还活着；死了就当陈锁清掉再试一次
+            # Lock exists: is the holder still alive? If not, treat it as stale and retry once
             try:
                 old_pid = int(LOCK.read_text(encoding="utf-8").strip() or 0)
             except (OSError, ValueError):
@@ -251,31 +258,31 @@ def acquire_lock() -> bool:
             try:
                 LOCK.unlink(missing_ok=True)
             except OSError:
-                return True          # 清不掉就别因此罢工
+                return True          # cannot clear it: do not refuse to work over this
         except OSError:
-            return True              # 锁文件写不了也不该阻断看护
+            return True              # an unwritable lock file must not block the watchdog
     return False
 
 
-# ── 对账 ─────────────────────────────────────────────────────
+# ── Reconcile ───────────────────────────────────────────────
 def reconcile(cfg: Path | None = None, p: int | None = None, quiet: bool = False) -> str:
-    """让代理状态跟上插件状态。返回本次动作描述。"""
+    """Bring the proxy state in line with the plugin state. Returns what it did."""
     p = p or port()
     active, why = is_active(cfg)
     running, _ = proxy_running(p)
 
     if active and not running:
         if not quiet:
-            log_err(f"插件激活但代理没跑（{why}）→ 启动代理")
+            log_err(f"plugin active but proxy not running ({why}) -> starting proxy")
         start_proxy(p)
         return "started"
     if not active and running:
         pids = our_pids(p)
         if not pids:
-            # 端口上有程序在监听，但不是本包的代理：不是我们该管的，绝不误杀。
+            # Something is listening on the port but it is not our proxy: not our business, never kill it.
             return "foreign-port" if not quiet else "ok"
         if not quiet:
-            log_err(f"插件未激活（{why}）→ 停止代理")
+            log_err(f"plugin inactive ({why}) -> stopping proxy")
         stop_proxy(p)
         return "stopped"
     return "ok" if active else "idle"
@@ -286,19 +293,20 @@ def show_status(cfg: Path | None = None, p: int | None = None) -> int:
     active, why = is_active(cfg)
     running, rwhy = proxy_running(p)
     pids = our_pids(p) if running else []
-    print(f"  插件激活 : {active}   （{why}）")
-    print(f"  代理运行 : {running} （{rwhy}）")
+    print(f"  plugin active : {active}   ({why})")
+    print(f"  proxy running : {running} ({rwhy})")
     if pids:
-        print(f"  本包代理 PID : {', '.join(pids)}")
-    print(f"  期望状态 : {'代理应在跑' if active else '代理应停止'}"
-          f"  →  {'一致' if active == running else '不一致，需对账'}")
+        print(f"  our proxy PID : {', '.join(pids)}")
+    print(f"  expected      : {'proxy should run' if active else 'proxy should stop'}"
+          f"  ->  {'in sync' if active == running else 'out of sync, needs reconcile'}")
     return 0
 
 
-# ── 登录自启 ─────────────────────────────────────────────────
-# 用「启动文件夹」而不是计划任务：schtasks /Create 通常需要管理员权限
-# （实测 "错误: 拒绝访问。"），而启动文件夹是按用户的、免权限、登录即跑。
-# 用 .vbs 包一层是为了隐藏控制台窗口（pythonw 已无窗口，双保险）。
+# ── Logon autostart ─────────────────────────────────────────
+# Use the Startup folder instead of a scheduled task: schtasks /Create normally
+# needs admin rights (measured: "ERROR: Access is denied."), while the Startup
+# folder is per-user, needs no elevation, and runs at logon.
+# The .vbs wrapper hides the console window (pythonw has none either; belt and braces).
 
 AUTOSTART_VBS = "workbuddy-bridge-watch.vbs"
 
@@ -315,19 +323,20 @@ def autostart_file() -> Path:
 
 
 def watcher_exe() -> str:
-    """优先 pythonw.exe（无控制台窗口）。"""
+    """Prefer pythonw.exe (no console window)."""
     return wbspawn.no_console_python()
 
 
 def _vbs(path_exe: str, path_script: str) -> str:
-    """生成自启 VBS。
+    """Build the autostart VBS.
 
-    用 Chr(34) 显式拼引号，而不是在字面量里数 `"` —— 直接写字符串字面量时
-    引号数量算错就会得到「未结束的字符串常量」编译错误（踩过）。
+    Quotes are assembled explicitly with Chr(34) instead of counting `"` inside a
+    literal -- miscounting them in a literal yields an "unterminated string
+    constant" compile error (measured).
     """
     return (
-        "' 由 workbuddy-bridge 安装：登录时启动代理看护（隐藏窗口）。\r\n"
-        "' 删除本文件即取消自启。\r\n"
+        "' Installed by workbuddy-bridge: start the proxy watchdog at logon (hidden).\r\n"
+        "' Delete this file to cancel autostart.\r\n"
         'Set sh = CreateObject("WScript.Shell")\r\n'
         f'exe = "{path_exe}"\r\n'
         f'script = "{path_script}"\r\n'
@@ -342,47 +351,47 @@ def install_autostart() -> int:
     try:
         d.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        log_err(f"无法访问启动文件夹 {d}：{e}")
-        print(f"  !! 无法访问启动文件夹：{e}")
+        log_err(f"cannot access the Startup folder {d}: {e}")
+        print(f"  !! cannot access the Startup folder: {e}")
         return 1
 
     target = autostart_file()
     exe, script = watcher_exe(), str(Path(__file__).resolve())
     try:
-        # UTF-16LE + BOM：WSH 认这个，且用户名/路径含非 ASCII 时也安全
+        # UTF-16LE + BOM: WSH understands it, and it stays safe when the user name or path is non-ASCII
         target.write_text(_vbs(exe, script), encoding="utf-16")
     except OSError as e:
-        log_err(f"写自启文件失败 {target}：{e}")
-        print(f"  !! 写自启文件失败：{e}")
+        log_err(f"failed to write the autostart file {target}: {e}")
+        print(f"  !! failed to write the autostart file: {e}")
         return 1
-    print(f"  已安装登录自启：{target}")
+    print(f"  logon autostart installed: {target}")
     print(f"    {exe} {script}")
 
-    # 立刻起一个，省得等到下次登录
+    # Start one now instead of waiting for the next logon
     if acquire_lock():
         try:
             wbspawn.spawn_detached([wbspawn.no_console_python(), script])
-            print("  看护已开始运行")
+            print("  watchdog started")
         except OSError as e:
-            print(f"  !! 立刻启动看护失败（登录后仍会自启）：{e}")
+            print(f"  !! failed to start the watchdog now (it will still start at logon): {e}")
     else:
-        print("  看护已在运行中")
-    print(f"  看护日志：{LOG}")
+        print("  watchdog already running")
+    print(f"  watchdog log: {LOG}")
     return 0
 
 
 def remove_autostart() -> int:
     target = autostart_file()
     if not target.is_file():
-        print("  没有安装自启（文件不存在）")
+        print("  no autostart installed (file not found)")
         return 0
     try:
         target.unlink()
     except OSError as e:
-        print(f"  !! 删除自启文件失败：{e}")
+        print(f"  !! failed to delete the autostart file: {e}")
         return 1
-    print(f"  已移除登录自启：{target}")
-    print("  注意：正在跑的看护进程不会被自动结束，可手动 taskkill。")
+    print(f"  logon autostart removed: {target}")
+    print("  Note: a running watchdog is not terminated; kill it with taskkill if needed.")
     return 0
 
 
@@ -395,14 +404,14 @@ def autostart_installed() -> bool:
 
 def main() -> int:
     _utf8()
-    ap = argparse.ArgumentParser(description="按 Codex 插件启用状态看护本地代理")
-    ap.add_argument("--interval", type=float, default=5.0, help="轮询间隔秒（默认 5）")
+    ap = argparse.ArgumentParser(description="Watch the local proxy based on the Codex plugin state")
+    ap.add_argument("--interval", type=float, default=5.0, help="poll interval in seconds (default 5)")
     ap.add_argument("--port", type=int, default=None)
-    ap.add_argument("--config", default=None, help="指定 config.toml（默认 $CODEX_HOME/config.toml）")
-    ap.add_argument("--once", action="store_true", help="只对账一次")
-    ap.add_argument("--status", action="store_true", help="打印判定，不改动")
-    ap.add_argument("--install-autostart", action="store_true", help="装登录自启")
-    ap.add_argument("--remove-autostart", action="store_true", help="移除登录自启")
+    ap.add_argument("--config", default=None, help="use a specific config.toml (default $CODEX_HOME/config.toml)")
+    ap.add_argument("--once", action="store_true", help="reconcile once")
+    ap.add_argument("--status", action="store_true", help="print the verdict without changing anything")
+    ap.add_argument("--install-autostart", action="store_true", help="install logon autostart")
+    ap.add_argument("--remove-autostart", action="store_true", help="remove logon autostart")
     a = ap.parse_args()
 
     cfg = Path(a.config) if a.config else None
@@ -419,19 +428,19 @@ def main() -> int:
         return 0
 
     if not acquire_lock():
-        print(f"  已有看护进程在跑（{LOCK}）；如需重启用 --once 或先删该文件。")
+        print(f"  a watchdog is already running ({LOCK}); use --once to re-check or delete the file first.")
         return 1
 
-    log_err(f"看护启动 pid={os.getpid()} 间隔={a.interval}s 配置={cfg or config_path()}")
+    log_err(f"watchdog started pid={os.getpid()} interval={a.interval}s config={cfg or config_path()}")
     try:
         while True:
             try:
                 reconcile(cfg, p)
-            except Exception as e:      # 单轮出错不能让看护整体退出
-                log_err(f"对账异常（已跳过本轮）：{type(e).__name__}: {e}")
+            except Exception as e:      # one bad round must not take the watchdog down
+                log_err(f"reconcile error (round skipped): {type(e).__name__}: {e}")
             time.sleep(a.interval)
     except KeyboardInterrupt:
-        log_err("看护退出（KeyboardInterrupt）")
+        log_err("watchdog exiting (KeyboardInterrupt)")
     finally:
         LOCK.unlink(missing_ok=True)
     return 0

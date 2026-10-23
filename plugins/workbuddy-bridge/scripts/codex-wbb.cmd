@@ -1,22 +1,28 @@
 @echo off
-rem Codex + WorkBuddy 一键启动：确保本地代理在跑，再以 wbb profile 启动 Codex。
+rem Launches Codex against WorkBuddy: ensures the local proxy is up, then runs
+rem Codex with the wbb profile.
 rem
-rem 用法与 codex 相同：
-rem     codex-wbb.cmd                     交互式 TUI
-rem     codex-wbb.cmd exec "重构 utils.py"
-rem     codex-wbb.cmd -m hy3              换模型（hy3 / deepseek-v4.1-flash 免费）
+rem Usage is the same as codex:
+rem     codex-wbb.cmd                     interactive TUI
+rem     codex-wbb.cmd exec "refactor utils.py"
+rem     codex-wbb.cmd -m hy3              switch model (hy3 / deepseek-v4.1-flash are free)
 rem
-rem 几处刻意的写法，别改：
-rem   1) 本文件必须保持 GBK(cp936)：UTF-8 中文在 936 代码页下会吞掉换行、拆散语句。
-rem   2) curl/ping 用 %SystemRoot% 全路径：否则 PATH 里的 git-bash 版会抢先匹配；
- rem      等待用 ping 而非 timeout.exe：timeout 在 stdin 被重定向时会直接报错。
-rem   3) 全篇不用 ( ) 块包 set：括号内的 %VAR% 在解析期就展开，块内刚 set 的值取不到。
-rem   4) codex 优先 npm 全局：PATH 里可能有别的 codex 抢先（例如某个 IDE 自带的那份
-rem      与 WorkBuddy 不兼容）。要强制指定就设 WBBRIDGE_CODEX。
+rem Notes on why this script looks the way it does:
+rem   1) Keep this file ASCII/GBK + CRLF. As UTF-8, non-ASCII text under code
+rem      page 936 swallows line endings and merges the next line into a rem.
+rem   2) Call curl/ping by full path under %SystemRoot%\System32, otherwise a
+rem      git-bash GNU build on PATH wins and errors out. Do not use timeout.exe
+rem      for waiting: it fails outright when stdin is redirected. Use ping -n 2.
+rem   3) Parenthesized blocks with set: %VAR% inside a block is expanded when the
+rem      block is parsed, so values set inside it are not visible until after.
+rem   4) Prefer the npm global codex. Another codex earlier on PATH (e.g. one
+rem      bundled with an IDE) may be incompatible with WorkBuddy; set
+rem      WBBRIDGE_CODEX to force a specific one.
 setlocal
 call "%~dp0_findpy.cmd"
 if not defined PYEXE (
-    echo [wbb] 找不到 python 解释器。请安装 Python 3.10+，或设置 WBBRIDGE_PYTHON。
+    echo [wbb] Python not found. Install Python 3.10+ ^(tick "Add python.exe to PATH"^),
+    echo       or set WBBRIDGE_PYTHON to a full python.exe path.
     exit /b 1
 )
 set "CURL=%SystemRoot%\System32\curl.exe"
@@ -35,7 +41,7 @@ if not defined CODEX set "CODEX=codex"
 "%CURL%" -s -o NUL --max-time 3 http://127.0.0.1:%PORT%/health
 if not errorlevel 1 goto ready
 
-echo [wbb] 本地代理未运行，正在启动...
+echo [wbb] Local proxy is not running, starting it...
 start "" /min "%PYEXE%" "%~dp0..\bin\wbproxy.py" --port %PORT%
 
 set /a tries=0
@@ -46,8 +52,8 @@ if not errorlevel 1 goto ready
 set /a tries+=1
 if %tries% lss 20 goto wait
 
-echo [wbb] 代理启动超时（20 秒）。请手动运行 start-wbbridge.cmd 查看原因。
-echo [wbb] 常见原因：WorkBuddy AI 桌面端未安装，或尚未登录。
+echo [wbb] Proxy did not come up within 20 seconds. Run start-wbbridge.cmd to see why.
+echo [wbb] Common causes: the WorkBuddy desktop app is not installed, or not signed in.
 exit /b 1
 
 :ready

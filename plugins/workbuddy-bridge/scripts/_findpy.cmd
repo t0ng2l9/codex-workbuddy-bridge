@@ -1,7 +1,7 @@
 @echo off
-rem 本脚本供其它 .cmd 脚本 call，返回一个能用的 python 解释器路径。
-rem 优先级：WBBRIDGE_PYTHON > 常见安装路径 > Codex 自带运行时 > PATH
-rem 本文件必须保存 GBK(cp936) + CRLF。
+rem Called by the other .cmd scripts; sets PYEXE to a usable python.exe.
+rem Order: WBBRIDGE_PYTHON > common install paths > Codex bundled runtime > PATH
+rem Keep this file ASCII/GBK + CRLF.
 set "PYEXE="
 if defined WBBRIDGE_PYTHON if exist "%WBBRIDGE_PYTHON%" set "PYEXE=%WBBRIDGE_PYTHON%"
 if not defined PYEXE if exist "%LOCALAPPDATA%\Programs\Python\Python313\python.exe" set "PYEXE=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
@@ -11,15 +11,15 @@ if not defined PYEXE if exist "%LOCALAPPDATA%\Programs\Python\Python310\python.e
 if not defined PYEXE if exist "%ProgramFiles%\Python313\python.exe" set "PYEXE=%ProgramFiles%\Python313\python.exe"
 if not defined PYEXE if exist "%ProgramFiles%\Python312\python.exe" set "PYEXE=%ProgramFiles%\Python312\python.exe"
 if not defined PYEXE if exist "%ProgramFiles%\Python311\python.exe" set "PYEXE=%ProgramFiles%\Python311\python.exe"
-rem Codex 桌面端自带的 Python（3.12 + cryptography），没装系统 Python 时靠它
+rem Python bundled with the Codex desktop app (3.12 + cryptography)
 if not defined PYEXE for /d %%d in ("%USERPROFILE%\.cache\codex-runtimes\*") do if not defined PYEXE if exist "%%d\dependencies\python\python.exe" set "PYEXE=%%d\dependencies\python\python.exe"
 if not defined PYEXE for /d %%d in ("%USERPROFILE%\.codex\runtimes\*") do if not defined PYEXE if exist "%%d\python\python.exe" set "PYEXE=%%d\python\python.exe"
-rem PATH 上的 python；跳过 WindowsApps 的「应用执行别名」存根
+rem python on PATH; skip the WindowsApps "app execution alias" stub
 if not defined PYEXE for /f "delims=" %%i in ('where python 2^>NUL') do if not defined PYEXE echo %%i | find /i "\WindowsApps\" >NUL || set "PYEXE=%%i"
 rem
-rem 同时给出无控制台窗口的解释器 PYWEXE（与 PYEXE 同目录的 pythonw.exe）。
-rem venv 的 python.exe 可能是 uv 存根，转发时不传 creationflags，真实解释器会弹可见控制台窗口；
-rem pythonw.exe 没有窗口。
+rem Also resolve PYWEXE: pythonw.exe next to PYEXE, so background processes get
+rem no console window. A venv python.exe may be a uv stub that forwards without
+rem creationflags, and the real interpreter then pops a visible console.
 set "PYWDIR="
 set "PYWEXE="
 if defined PYEXE for %%d in ("%PYEXE%") do set "PYWDIR=%%~dpd"

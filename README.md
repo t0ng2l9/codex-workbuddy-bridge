@@ -1,95 +1,106 @@
-# WorkBuddy Bridge — Codex 插件市场
+# WorkBuddy Bridge - Codex Plugin Marketplace
 
-把 **WorkBuddy AI 桌面端（国际版）**已登录的模型接进 **Codex**（CLI 与桌面端）。
-不需要 OpenAI 订阅，也不需要 Codex 套餐 —— Codex 只出它的 agent 骨架，模型换成 WorkBuddy 的。
+Connect the models you are already signed in to in the **WorkBuddy AI desktop app
+(international build)** to **Codex** (CLI and desktop app). No OpenAI subscription
+and no Codex plan required - Codex provides the agent scaffolding, WorkBuddy
+provides the models.
 
 ```
-Codex ──► 127.0.0.1:8788（本机代理）──► workbuddy.ai ──► 真实模型
-           │  解密桌面端登录态
-           │  Responses ⇄ Chat Completions 转换
-           │  记录/同步「实际在用」的模型
-           │  生成模型切换列表
+Codex --> 127.0.0.1:8788 (local proxy) --> workbuddy.ai --> real models
+             |  decrypts the desktop app session
+             |  Responses <-> Chat Completions translation
+             |  records / syncs the model actually in use
+             |  generates the model picker catalog
 ```
 
-插件名 `workbuddy-bridge`，市场名 `wbbridge`，provider `wbbridge`，profile `wbb`，
-代理端口 `8788` —— 与机器上其它同类接入**互不冲突**，可以并存。
+Plugin name `workbuddy-bridge`, marketplace `wbbridge`, provider `wbbridge`,
+profile `wbb`, proxy port `8788` - deliberately distinct from other similar
+bridges so both can coexist on the same machine.
 
 ---
 
-## 安装
+## Install
 
 ```cmd
-:: 1. 加市场（GitHub / 本地目录 / 解压出来的 zip 都行）
+:: 1. add the marketplace (GitHub, a local folder, or an unzipped zip all work)
 codex plugin marketplace add zetongliu219-alt/workbuddy-bridge
 
-:: 2. 装插件
+:: 2. install the plugin
 codex plugin add workbuddy-bridge@wbbridge
 
-:: 3. 体检 + 安装（写 provider / profile / 模型目录 / 技能 / 指令规则）
-python "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge\<版本>\bin\setup.py" doctor
-python "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge\<版本>\bin\setup.py" install
+:: 3. check the environment, then install (provider / profile / catalog / skill / AGENTS rule)
+python "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge\<version>\bin\setup.py" doctor
+python "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge\<version>\bin\setup.py" install
 ```
 
-装完 `codex --profile wbb` 即可，或直接 `scripts\codex-wbb.cmd`（代理没跑会自动拉起）。
-桌面端用的话：**新建会话**才会走新 provider。
+Then run `codex --profile wbb`, or just `scripts\codex-wbb.cmd` (it starts the
+proxy if needed). In the desktop app, **start a new session** to pick up the new
+provider.
 
-详细说明（排错、模型清单、免费档、hook 信任、代理生命周期）见
-[`plugins/workbuddy-bridge/README.md`](plugins/workbuddy-bridge/README.md)。
+For details (troubleshooting, model list, free tier, hook trust, proxy
+lifecycle) see [`plugins/workbuddy-bridge/README.md`](plugins/workbuddy-bridge/README.md).
 
 ---
 
-## 收件人需要什么
+## What a user needs
 
-| 项 | 要求 |
+| Item | Requirement |
 |---|---|
-| Windows | 必需（脚本与凭据路径都是 Windows 的） |
-| WorkBuddy AI 桌面端（国际版） | 装过并**登录一次**；不需要常驻 |
-| Python | 3.10+ 且带 `cryptography`；没装系统 Python 时可用 Codex 自带运行时 |
-| Codex | 0.153+（本版在 0.163 上实测通过） |
+| Windows | Required (the scripts and credential paths are Windows-specific) |
+| WorkBuddy AI desktop app (international) | Installed and **signed in once**; it does not need to stay running |
+| Python | 3.10+ with `cryptography`; if no system Python exists, Codex's bundled runtime works |
+| Codex | 0.153+ (verified on 0.163) |
 
-`doctor` 会逐项告诉你缺什么、怎么补。**让每个使用者登录自己的账号**，不要传凭据文件。
+`doctor` reports exactly what is missing and how to fix it. **Every user must
+sign in with their own account** - never share credential files.
 
 ---
 
-## 仓库结构
+## Repository layout
 
 ```
 .
-├─ .agents/plugins/marketplace.json        市场索引（Codex 据此发现插件）
-├─ .gitattributes                          *.cmd 标记 binary（保护 GBK+CRLF 脚本）
-└─ plugins/workbuddy-bridge/               插件本体
-   ├─ .codex-plugin/plugin.json            插件清单
-   ├─ bin/                                 代理与安装器（Python）
-   ├─ scripts/                             启动器与 hook 入口（.cmd）
-   ├─ skills/                              用法排错 + 当前模型查询
-   ├─ commands/                            /wbbridge-setup、/wbbridge-status
-   ├─ hooks/hooks.json                     SessionStart：代理没跑就拉起
-   └─ README.md                            插件详细文档
+|- .agents/plugins/marketplace.json        marketplace index (Codex discovers the plugin here)
+|- .gitattributes                          marks *.cmd as binary (protects the GBK + CRLF scripts)
+`- plugins/workbuddy-bridge/               the plugin itself
+   |- .codex-plugin/plugin.json            plugin manifest
+   |- bin/                                 proxy and installer (Python)
+   |- scripts/                             launchers and hook entry points (.cmd)
+   |- skills/                              usage/troubleshooting + live model lookup
+   |- commands/                            /wbbridge-setup, /wbbridge-status
+   |- hooks/hooks.json                     SessionStart: start the proxy if it is down
+   `- README.md                            full plugin documentation
 ```
 
 ---
 
-## 分享给别人
+## Sharing it
 
-三种都实测可用，只差第一步的参数：
+All three paths are tested; only the first step differs:
 
-| 给法 | 对方怎么装 |
+| How | What the other person runs |
 |---|---|
-| GitHub 仓库 | `codex plugin marketplace add zetongliu219-alt/workbuddy-bridge` |
-| 共享目录 / U 盘 | `codex plugin marketplace add D:\share\workbuddy-bridge` |
-| zip | 解压后 `codex plugin marketplace add %USERPROFILE%\Downloads\workbuddy-bridge` |
+| GitHub repo | `codex plugin marketplace add zetongliu219-alt/workbuddy-bridge` |
+| Shared folder / USB stick | `codex plugin marketplace add D:\share\workbuddy-bridge` |
+| zip | unzip, then `codex plugin marketplace add %USERPROFILE%\Downloads\workbuddy-bridge` |
 
-打包 zip 时**必须带上 `.gitattributes`**：它把 `*.cmd` 标为 binary，防止 git 的换行规范化
-把 GBK+CRLF 的中文脚本改坏。
+When you build the zip, **`.gitattributes` must be included**: it marks `*.cmd`
+as binary so git's newline normalisation cannot corrupt the GBK + CRLF scripts.
 
 ---
 
-## 合规
+## Caveats
 
-上游是**私有逆向接口**，绕过其 system-prompt 指纹属于主动规避风控。因此：
+The upstream is a **private, reverse-engineered API**, and bypassing its
+system-prompt fingerprint is an active evasion of their risk controls. Therefore:
 
-- **小范围分享可以，别公开分发/写教程**。大规模使用会触发上游风控，接口一封所有人都用不了。
-- **别滥用免费档**（`hy3` / `deepseek-v4.1-flash` / `step-5-preview`）：高频会触发账号级限流。
-- 代理只绑 `127.0.0.1`，**不要**改成 `0.0.0.0` —— 那等于把账号令牌暴露给整个局域网。
+- **Small-scale sharing is fine; do not distribute publicly or publish a tutorial.**
+  Large-scale use triggers upstream abuse detection, and if the endpoint gets
+  closed everyone loses access.
+- **Do not hammer the free tier** (`hy3` / `deepseek-v4.1-flash` / `step-5-preview`);
+  high request rates trigger account-level rate limits.
+- The proxy binds to `127.0.0.1` only. **Never** change it to `0.0.0.0` - that
+  would expose your account token to the whole local network.
 
-详见 [插件 README 的「安全与合规」](plugins/workbuddy-bridge/README.md#安全与合规)。
+See the plugin README's [security and caveats](plugins/workbuddy-bridge/README.md#security-and-caveats)
+section for details.

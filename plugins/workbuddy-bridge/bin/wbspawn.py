@@ -1,25 +1,27 @@
-"""以后台、无控制台窗口的方式启动本插件的 Python 进程。
+"""Start this plugin's Python processes in the background, with no console window.
 
-为什么需要这个模块（实测结论，别改成 `sys.executable`）：
+Why this module exists (measured; do not "simplify" it to `sys.executable`):
 
-某些 Agent 环境的 venv 里 `Scripts\\python.exe` 只有 ~45KB，是 **uv 的 launcher 存根**，
-它会重新 spawn `pyvenv.cfg` 的 `home` 指向的**真实**解释器，而创建进程时给的
-`creationflags` **不会跟着传过去** —— 于是真实进程按默认方式启动，自己创建了一个
-**可见的控制台窗口**（实测：存根进程 `MainWindowHandle=0`，它 spawn 出来的真实
-解释器 `MainWindowHandle=1251688`，标题正是 `…\\venv\\Scripts\\python.exe`）。
+In some agent environments the venv's `Scripts\\python.exe` is only ~45KB: it is a
+**uv launcher stub**. It re-spawns the *real* interpreter named by `pyvenv.cfg`'s
+`home`, and the `creationflags` given to the stub are **not forwarded**. The real
+process therefore starts with defaults and creates its own **visible console
+window** (measured: the stub has `MainWindowHandle=0`, the real interpreter it
+spawned has `MainWindowHandle=1251688`, titled `...\\venv\\Scripts\\python.exe`).
 
-正确的做法是**用 venv 自带的 `pythonw.exe` 存根**：
+The correct approach is to use the venv's own `pythonw.exe` stub:
 
-- 存根会激活 venv → `cryptography` 等依赖可用；
-- 它是 **GUI 子系统**，转发时启动的是真实 `pythonw.exe`（不是 `python.exe`）
-  → 全程不创建控制台。
+- the stub activates the venv, so `cryptography` and friends are importable;
+- it is a **GUI-subsystem** binary, so the real process it forwards to is
+  `pythonw.exe` (not `python.exe`) and no console is ever created.
 
-**不要**改成直接调用 `pyvenv.cfg` 里 `home` 下的真实 `pythonw.exe` —— 那样会**丢掉 venv**
-（真实解释器没有 venv 的 site-packages，实测 `ModuleNotFoundError: cryptography`，
-进程起不来且日志里什么都没有）。
+Do **not** call the real `pythonw.exe` under `pyvenv.cfg`'s `home` directly: that
+loses the venv (the real interpreter has no venv site-packages; measured
+`ModuleNotFoundError: cryptography`, process never starts and the log stays empty).
 
-另外：只用 `DETACHED_PROCESS`（`0x8`），**不要与 `CREATE_NO_WINDOW` 按位或** ——
-两者语义冲突，而且真正的问题在存根转发，加那个标志不解决。
+Also: use `DETACHED_PROCESS` (`0x8`) alone, **not** OR-ed with `CREATE_NO_WINDOW`.
+The two flags conflict semantically, and the real problem is the stub forwarding,
+which that flag does not fix.
 """
 from __future__ import annotations
 
@@ -28,18 +30,19 @@ import sys
 import tempfile
 from pathlib import Path
 
-#: 新进程不继承父控制台，也不随父进程退出而终止。
+#: The new process neither inherits the parent console nor dies with the parent.
 DETACHED_PROCESS = 0x00000008
 
-#: 后台进程的默认日志（各调用点通常会自己指定更贴合用途的日志）。
+#: Default log for background processes (callers usually pass a more specific one).
 DEFAULT_LOG = Path(tempfile.gettempdir()) / "wbbridge-launch.log"
 
 
 def no_console_python() -> str:
-    """返回一个启动后**不会出现控制台窗口**、且**保留 venv** 的 python 解释器路径。
+    """Return a python interpreter path that shows **no console window** and
+    **keeps the venv**.
 
-    优先 venv 里与当前解释器同目录的 `pythonw.exe` 存根；没有就退回当前解释器
-    （可能带控制台，但至少能跑）。
+    Prefers the `pythonw.exe` stub sitting next to the current interpreter;
+    falls back to the current interpreter (may show a console, but at least runs).
     """
     try:
         cand = Path(sys.executable).with_name("pythonw.exe")
@@ -51,10 +54,11 @@ def no_console_python() -> str:
 
 
 def spawn_detached(args: list[str], log: Path | None = None, cwd: str | None = None):
-    """后台启动一个不显示窗口、且不随父进程退出的进程。
+    """Start a background process with no window that outlives its parent.
 
-    子进程 stdout/stderr 追加到 `log`（默认 `%TEMP%\\wbbridge-launch.log`），
-    stdin 接 DEVNULL —— 否则子进程可能继承父进程的管道，父进程退出后写失败。
+    Child stdout/stderr are appended to `log` (default
+    `%TEMP%\\wbbridge-launch.log`), and stdin is DEVNULL; otherwise the child may
+    inherit the parent's pipes and fail to write after the parent exits.
     """
     log = log or DEFAULT_LOG
     kwargs: dict = {"stdin": subprocess.DEVNULL, "cwd": cwd}
@@ -74,13 +78,13 @@ def spawn_detached(args: list[str], log: Path | None = None, cwd: str | None = N
         proc = subprocess.Popen([str(a) for a in args], **kwargs)
     finally:
         if fh is not None:
-            fh.close()          # 子进程持有自己的句柄副本，关掉父进程这边的即可
+            fh.close()          # the child holds its own handle; close ours
     return proc
 
 
 def python_note() -> str:
-    """给 doctor / 排错用：说明后台将用哪个解释器。"""
+    """For doctor / troubleshooting: which interpreter background work will use."""
     exe = no_console_python()
     if exe == sys.executable:
-        return f"{exe}  [当前解释器：可能带控制台窗口]"
-    return f"{exe}  [pythonw 存根：无控制台，且保留 venv]"
+        return f"{exe}  [current interpreter: may show a console window]"
+    return f"{exe}  [pythonw stub: no console, venv preserved]"
