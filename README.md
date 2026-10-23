@@ -23,7 +23,7 @@ bridges so both can coexist on the same machine.
 
 ```cmd
 :: 1. add the marketplace (GitHub, a local folder, or an unzipped zip all work)
-codex plugin marketplace add zetongliu219-alt/workbuddy-bridge
+codex plugin marketplace add t0ng2l9/workbuddy-bridge
 
 :: 2. install the plugin
 codex plugin add workbuddy-bridge@wbbridge
@@ -80,7 +80,7 @@ All three paths are tested; only the first step differs:
 
 | How | What the other person runs |
 |---|---|
-| GitHub repo | `codex plugin marketplace add zetongliu219-alt/workbuddy-bridge` |
+| GitHub repo | `codex plugin marketplace add t0ng2l9/workbuddy-bridge` |
 | Shared folder / USB stick | `codex plugin marketplace add D:\share\workbuddy-bridge` |
 | zip | unzip, then `codex plugin marketplace add %USERPROFILE%\Downloads\workbuddy-bridge` |
 

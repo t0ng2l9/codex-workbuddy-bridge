@@ -27,7 +27,7 @@ run the installer once** so the provider is written into the Codex config.
 
 ```cmd
 :: 1. add the marketplace (GitHub; use a local path for a folder or an unzipped zip)
-codex plugin marketplace add zetongliu219-alt/workbuddy-bridge
+codex plugin marketplace add t0ng2l9/workbuddy-bridge
 
 :: 2. install the plugin
 codex plugin add workbuddy-bridge@wbbridge
@@ -159,7 +159,7 @@ taskkill /F /PID <PID>
 ```cmd
 codex plugin marketplace list
 :: only if wbbridge is missing:
-:: codex plugin marketplace add zetongliu219-alt/workbuddy-bridge
+:: codex plugin marketplace add t0ng2l9/workbuddy-bridge
 ```
 
 **Step 2 - install / reinstall the plugin**:

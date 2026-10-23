@@ -45,7 +45,7 @@ dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge"
 Install / update (`marketplace add` is needed only once):
 
 ```cmd
-codex plugin marketplace add zetongliu219-alt/workbuddy-bridge   :: or a local dir / unzipped zip
+codex plugin marketplace add t0ng2l9/workbuddy-bridge   :: or a local dir / unzipped zip
 codex plugin add workbuddy-bridge@wbbridge
 python "<plugin>\bin\setup.py" doctor
 python "<plugin>\bin\setup.py" install
