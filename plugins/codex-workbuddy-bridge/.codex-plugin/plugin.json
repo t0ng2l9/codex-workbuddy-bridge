@@ -1,5 +1,5 @@
 {
-  "name": "workbuddy-bridge",
+  "name": "codex-workbuddy-bridge",
   "version": "1.0.0",
   "description": "Connect the models you are signed in to in the WorkBuddy AI desktop app to Codex (CLI and desktop app), with no OpenAI subscription or Codex plan required.",
   "author": {

@@ -1,4 +1,4 @@
-"""workbuddy-bridge installer / uninstaller.
+"""codex-workbuddy-bridge installer / uninstaller.
 
 Does four things (all idempotent, safe to run repeatedly):
 
@@ -30,11 +30,11 @@ import wbdiscover  # noqa: E402
 from wbdiscover import console_encodings  # noqa: E402
 
 HERE = Path(__file__).resolve().parent          # .../bin
-PKG_ROOT = HERE.parent                           # .../workbuddy-bridge
+PKG_ROOT = HERE.parent                           # .../codex-workbuddy-bridge
 PROVIDER = "wbbridge"
 PROFILE_NAME = "wbb"
-MARK_BEGIN = "<!-- BEGIN workbuddy-bridge -->"
-MARK_END = "<!-- END workbuddy-bridge -->"
+MARK_BEGIN = "<!-- BEGIN codex-workbuddy-bridge -->"
+MARK_END = "<!-- END codex-workbuddy-bridge -->"
 
 PROVIDER_BLOCK = f"""[model_providers.{PROVIDER}]
 name = "WorkBuddy"
@@ -529,7 +529,7 @@ def cmd_status(args) -> int:
     print(f"AGENTS.md rule      : {ag.is_file() and MARK_BEGIN in read_text_keep(ag)}")
     print(f"proxy {args.port} running : {port_open(args.port)}")
     startup = (Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows"
-               / "Start Menu" / "Programs" / "Startup" / "workbuddy-bridge-watch.vbs")
+               / "Start Menu" / "Programs" / "Startup" / "codex-workbuddy-bridge-watch.vbs")
     print(f"watchdog autostart  : {startup.is_file()}")
     if port_open(args.port):
         import json
@@ -546,7 +546,7 @@ def cmd_status(args) -> int:
 
 def main() -> int:
     console_encodings()
-    ap = argparse.ArgumentParser(description="workbuddy-bridge installer")
+    ap = argparse.ArgumentParser(description="codex-workbuddy-bridge installer")
     ap.add_argument("--port", type=int, default=int(os.environ.get("WBBRIDGE_PROXY_PORT", 8788)))
     sub = ap.add_subparsers(dest="cmd", required=True)
 

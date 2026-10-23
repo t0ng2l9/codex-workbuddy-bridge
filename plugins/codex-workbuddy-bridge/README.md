@@ -1,4 +1,4 @@
-# workbuddy-bridge
+# codex-workbuddy-bridge
 
 Turns the models you are already signed in to in the **WorkBuddy AI desktop app**
 into the model source for **Codex (CLI / desktop app)**.
@@ -27,13 +27,13 @@ run the installer once** so the provider is written into the Codex config.
 
 ```cmd
 :: 1. add the marketplace (GitHub; use a local path for a folder or an unzipped zip)
-codex plugin marketplace add t0ng2l9/workbuddy-bridge
+codex plugin marketplace add t0ng2l9/codex-workbuddy-bridge
 
 :: 2. install the plugin
-codex plugin add workbuddy-bridge@wbbridge
+codex plugin add codex-workbuddy-bridge@wbbridge
 
 :: 3. find where the plugin actually landed (Codex materialises it into the cache)
-dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge"
+dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\codex-workbuddy-bridge"
 
 :: 4. check the environment, then install (idempotent)
 python "<plugin root>\bin\setup.py" doctor
@@ -49,7 +49,7 @@ The plugin exposes three surfaces:
 
 | Surface | Contents |
 |---|---|
-| `skills/` | `workbuddy-bridge` (usage / troubleshooting), `wbbridge-current-model` (answers "current model" correctly) |
+| `skills/` | `codex-workbuddy-bridge` (usage / troubleshooting), `wbbridge-current-model` (answers "current model" correctly) |
 | `commands/` | `/wbbridge-setup`, `/wbbridge-status` |
 | `hooks/hooks.json` | `SessionStart`: start the proxy if it is not running |
 
@@ -81,7 +81,7 @@ Pick **Trust all and continue**.
 
 Trust is stored in `config.toml` under `hooks.state.<hook key>.trusted_hash`
 (where `<hook key>` looks like
-`workbuddy-bridge@wbbridge:hooks/hooks.json:session_start:0:0`).
+`codex-workbuddy-bridge@wbbridge:hooks/hooks.json:session_start:0:0`).
 **After editing the hook you get "Hook changed since last trusted" and must
 trust it again.** If you see "Another config layer overrides these hook
 settings", a higher-priority layer (admin / project config) is winning and has to
@@ -103,7 +103,7 @@ session starts"**:
 The watchdog (`bin/watch_plugin.py`) is exactly **"start/stop the proxy according
 to the plugin's enabled state"**:
 
-- **Plugin active** (`[plugins."workbuddy-bridge@wbbridge"] enabled = true` in
+- **Plugin active** (`[plugins."codex-workbuddy-bridge@wbbridge"] enabled = true` in
   `config.toml` and the plugin is installed) -> keep the proxy running
 - **Plugin inactive** (`enabled = false`, or uninstalled) -> stop the proxy
 
@@ -159,13 +159,13 @@ taskkill /F /PID <PID>
 ```cmd
 codex plugin marketplace list
 :: only if wbbridge is missing:
-:: codex plugin marketplace add t0ng2l9/workbuddy-bridge
+:: codex plugin marketplace add t0ng2l9/codex-workbuddy-bridge
 ```
 
 **Step 2 - install / reinstall the plugin**:
 
 ```cmd
-codex plugin add workbuddy-bridge@wbbridge
+codex plugin add codex-workbuddy-bridge@wbbridge
 ```
 
 > If the **version number did not change**, Codex reuses the existing cache and
@@ -181,7 +181,7 @@ catalog / skill / AGENTS rule and registers the watchdog autostart):
 
 ```cmd
 :: find the directory that was just materialised (it contains the version)
-dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge"
+dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\codex-workbuddy-bridge"
 
 python "<plugin dir>\bin\setup.py" doctor        :: environment check
 python "<plugin dir>\bin\setup.py" install       :: install (idempotent)
@@ -199,7 +199,7 @@ curl -s http://127.0.0.1:8788/health               :: ok:true
 Common traps:
 
 - **`codex plugin list` says `not installed` but the directory is there** -> the
-  `[plugins."workbuddy-bridge@wbbridge"]` entry vanished from the config; redo
+  `[plugins."codex-workbuddy-bridge@wbbridge"]` entry vanished from the config; redo
   step 2. No need to `marketplace add` again.
 - **The watchdog "does not work" after a reinstall** -> it was started from the
   **old** cache directory (which is now dangling). Run `install` again per step 3;
@@ -217,7 +217,7 @@ Common traps:
 ## Layout
 
 ```
-workbuddy-bridge/
+codex-workbuddy-bridge/
 |- install.cmd / uninstall.cmd / status.cmd / doctor.cmd   install / remove / query / check
 |- .codex-plugin/plugin.json    plugin manifest (required for a Codex plugin)
 |- bin/
@@ -238,7 +238,7 @@ workbuddy-bridge/
 |  |- hook-session-start.cmd  hook entry point (must stay silent + use %CLAUDE_PLUGIN_ROOT%)
 |  `- _findpy.cmd       called by the above: find a usable python
 |- skills/
-|  |- workbuddy-bridge/   usage, free tiers, troubleshooting, caveats
+|  |- codex-workbuddy-bridge/   usage, free tiers, troubleshooting, caveats
 |  `- wbbridge-current-model/       makes Codex answer "current model" correctly
 |- templates/                    reference snippets (for manual setups)
 `- dev/                          [local] diagnostic/test scripts (**not shipped in the repo**)
@@ -310,7 +310,7 @@ status.cmd
 
 This package uses its own identifiers: port `8788`, provider `wbbridge`, profile
 `wbb`, cache directory `plugins/cache/wbbridge/`, watchdog task
-`workbuddy-bridge-watch`. If another WorkBuddy bridge is installed on the same
+`codex-workbuddy-bridge-watch`. If another WorkBuddy bridge is installed on the same
 machine, both can be installed and run at the same time without interfering.
 
 The only thing that can "collide" is the top-level `model_catalog_json` in
@@ -328,7 +328,7 @@ one plugin's catalog. Default behaviour:
 
 **Prefer installing as a plugin** (see "Installing as a Codex plugin" above):
 copy or push this repository (marketplace layout) to GitHub, have them run
-`codex plugin marketplace add ...` + `codex plugin add workbuddy-bridge@wbbridge`,
+`codex plugin marketplace add ...` + `codex plugin add codex-workbuddy-bridge@wbbridge`,
 then `bin\setup.py install`.
 
 You can also **copy the plugin directory directly**, bypassing Codex's plugin

@@ -6,4 +6,4 @@ dev/_work/
 
 # Local diagnostics (reverse-engineering notes / fingerprint bisecting),
 # never published
-plugins/workbuddy-bridge/dev/
+plugins/codex-workbuddy-bridge/dev/

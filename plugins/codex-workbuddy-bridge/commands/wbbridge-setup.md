@@ -52,7 +52,7 @@ python "<plugin root>\bin\watch_plugin.py" --status
 ## Notes
 
 - `<plugin root>` is the real directory after installation; find it with:
-  `dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge"`
+  `dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\codex-workbuddy-bridge"`
 - The install is idempotent: re-running never changes what is already in place
   and never accumulates blank lines.
 - Do not modify any section of `config.toml` other than this plugin own block.
@@ -60,4 +60,4 @@ python "<plugin root>\bin\watch_plugin.py" --status
 - After changing plugin content, bump the version before reinstalling (Codex
   caches by version):
   `python "<plugin root>\bin\bump-plugin.py" "<plugin dir>"` then
-  `codex plugin add workbuddy-bridge@wbbridge`.
+  `codex plugin add codex-workbuddy-bridge@wbbridge`.

@@ -42,7 +42,7 @@ python "<plugin root>\bin\watch_plugin.py" --once
 Logs: `%TEMP%\wbbridge-proxy.log` (proxy), `%TEMP%\wbbridge-watch.log` (watchdog).
 
 > Find `<plugin root>` with:
-> `dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge"`
+> `dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\codex-workbuddy-bridge"`
 
 ## When reporting to the user
 
@@ -58,7 +58,7 @@ Logs: `%TEMP%\wbbridge-proxy.log` (proxy), `%TEMP%\wbbridge-watch.log` (watchdog
 | Symptom | Usually |
 |---|---|
 | `--status` says out of sync | the watchdog is not running -> `--install-autostart`; or the plugin is disabled |
-| `--status` says inactive | `[plugins."workbuddy-bridge@wbbridge"] enabled = false`, or it was uninstalled |
+| `--status` says inactive | `[plugins."codex-workbuddy-bridge@wbbridge"] enabled = false`, or it was uninstalled |
 | Proxy runs but the desktop app still errors | check the upstream error line in `%TEMP%\wbbridge-proxy.log` (429 -> `code 14003`) |
 | A new session does not start the proxy | the hook is untrusted (`trustStatus: untrusted`) -> desktop app Settings -> Hooks -> Trust all |
 | Desktop app shows no WorkBuddy models | `model_catalog.json` was not generated correctly -> re-run `install.cmd` |

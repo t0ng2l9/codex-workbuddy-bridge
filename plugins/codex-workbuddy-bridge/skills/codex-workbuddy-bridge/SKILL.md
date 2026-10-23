@@ -1,5 +1,5 @@
 ---
-name: workbuddy-bridge
+name: codex-workbuddy-bridge
 description: >-
   Connect the models you are signed in to in the WorkBuddy AI desktop app to Codex
   (CLI and desktop app), or troubleshoot that bridge. Use when the user wants to use
@@ -39,14 +39,14 @@ take effect on their own:
 Every `<plugin>` below must be the real location. Locate it first:
 
 ```cmd
-dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge"
+dir /b /s "%USERPROFILE%\.codex\plugins\cache\wbbridge\codex-workbuddy-bridge"
 ```
 
 Install / update (`marketplace add` is needed only once):
 
 ```cmd
-codex plugin marketplace add t0ng2l9/workbuddy-bridge   :: or a local dir / unzipped zip
-codex plugin add workbuddy-bridge@wbbridge
+codex plugin marketplace add t0ng2l9/codex-workbuddy-bridge   :: or a local dir / unzipped zip
+codex plugin add codex-workbuddy-bridge@wbbridge
 python "<plugin>\bin\setup.py" doctor
 python "<plugin>\bin\setup.py" install
 ```
@@ -56,7 +56,7 @@ version before reinstalling or nothing changes:
 
 ```cmd
 python "<plugin>\bin\bump-plugin.py" "<plugin dir>"
-codex plugin add workbuddy-bridge@wbbridge
+codex plugin add codex-workbuddy-bridge@wbbridge
 ```
 
 Warning: before reinstalling make sure **no process is using the plugin directory
@@ -156,7 +156,7 @@ python "<plugin>\bin\watch_plugin.py" --status
 | `--remove-autostart` | remove logon autostart |
 
 Log: `%TEMP%\wbbridge-watch.log` (state changes and errors only). Autostart file:
-`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\workbuddy-bridge-watch.vbs`.
+`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\codex-workbuddy-bridge-watch.vbs`.
 
 The watchdog **never kills an unrelated program**: before stopping the proxy it
 checks that the command line contains the `wbproxy.py` from this package; if the

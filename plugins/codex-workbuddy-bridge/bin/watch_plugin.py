@@ -39,10 +39,10 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 BIN = PLUGIN_ROOT / "bin"
 PROXY = BIN / "wbproxy.py"
 
-PLUGIN_NAME = "workbuddy-bridge"
+PLUGIN_NAME = "codex-workbuddy-bridge"
 MARKETPLACE = "wbbridge"
 DEFAULT_PORT = 8788
-TASK_NAME = "workbuddy-bridge-watch"
+TASK_NAME = "codex-workbuddy-bridge-watch"
 
 LOG = Path(tempfile.gettempdir()) / "wbbridge-watch.log"
 LOCK = Path(tempfile.gettempdir()) / "wbbridge-watch.lock"
@@ -308,7 +308,7 @@ def show_status(cfg: Path | None = None, p: int | None = None) -> int:
 # folder is per-user, needs no elevation, and runs at logon.
 # The .vbs wrapper hides the console window (pythonw has none either; belt and braces).
 
-AUTOSTART_VBS = "workbuddy-bridge-watch.vbs"
+AUTOSTART_VBS = "codex-workbuddy-bridge-watch.vbs"
 
 
 def startup_dir() -> Path:
@@ -335,7 +335,7 @@ def _vbs(path_exe: str, path_script: str) -> str:
     constant" compile error (measured).
     """
     return (
-        "' Installed by workbuddy-bridge: start the proxy watchdog at logon (hidden).\r\n"
+        "' Installed by codex-workbuddy-bridge: start the proxy watchdog at logon (hidden).\r\n"
         "' Delete this file to cancel autostart.\r\n"
         'Set sh = CreateObject("WScript.Shell")\r\n'
         f'exe = "{path_exe}"\r\n'

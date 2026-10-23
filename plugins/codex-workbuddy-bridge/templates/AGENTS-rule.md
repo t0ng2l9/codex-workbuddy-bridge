@@ -1,6 +1,6 @@
 <!-- Append to %USERPROFILE%\.codex\AGENTS.md (global instructions, injected into every session) -->
 
-<!-- BEGIN workbuddy-bridge -->
+<!-- BEGIN codex-workbuddy-bridge -->
 ## Always look up the current model, never answer from context
 
 When asked an identity-style question such as "which model are you", "what model
@@ -23,4 +23,4 @@ Rules:
   context, and your own previous answers, are all unreliable: the user can switch
   models mid-session and nothing in the history shows it.
 - Re-run the command every time. Never reuse a value obtained earlier in the session.
-<!-- END workbuddy-bridge -->
+<!-- END codex-workbuddy-bridge -->

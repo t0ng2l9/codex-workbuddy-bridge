@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "workbuddy-bridge",
+      "name": "codex-workbuddy-bridge",
       "source": {
         "source": "local",
-        "path": "./plugins/workbuddy-bridge"
+        "path": "./plugins/codex-workbuddy-bridge"
       },
       "policy": {
         "installation": "AVAILABLE",
