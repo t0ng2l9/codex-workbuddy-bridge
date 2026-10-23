@@ -22,8 +22,8 @@ Codex ──► 127.0.0.1:8788（本机代理）──► workbuddy.ai ──►
 **还需要跑一次安装器**把 provider 写进 Codex 配置。
 
 ```cmd
-:: 1. 加市场（路径换成你放仓库的地方；从 GitHub 装则用 <owner>/<repo>）
-codex plugin marketplace add C:\path\to\workbuddy-bridge
+:: 1. 加市场（从 GitHub 装；本地目录/zip 换成对应路径）
+codex plugin marketplace add zetongliu219-alt/workbuddy-bridge
 
 :: 2. 装插件
 codex plugin add workbuddy-bridge@wbbridge
@@ -140,7 +140,7 @@ taskkill /F /PID <PID>
 ```cmd
 codex plugin marketplace list
 :: 没有 workbuddy 时才需要：
-:: codex plugin marketplace add <你的GitHub用户名>/workbuddy-bridge
+:: codex plugin marketplace add zetongliu219-alt/workbuddy-bridge
 ```
 
 **第 2 步 · 装/重装插件**：

@@ -20,7 +20,7 @@ Codex ──► 127.0.0.1:8788（本机代理）──► workbuddy.ai ──►
 
 ```cmd
 :: 1. 加市场（GitHub / 本地目录 / 解压出来的 zip 都行）
-codex plugin marketplace add <owner>/workbuddy-bridge   :: 或本地目录 / 解压出的 zip 目录
+codex plugin marketplace add zetongliu219-alt/workbuddy-bridge
 
 :: 2. 装插件
 codex plugin add workbuddy-bridge@wbbridge
@@ -75,7 +75,7 @@ python "%USERPROFILE%\.codex\plugins\cache\wbbridge\workbuddy-bridge\<版本>\bi
 
 | 给法 | 对方怎么装 |
 |---|---|
-| GitHub 仓库 | `codex plugin marketplace add <owner>/workbuddy-bridge   :: 或本地目录 / 解压出的 zip 目录` |
+| GitHub 仓库 | `codex plugin marketplace add zetongliu219-alt/workbuddy-bridge` |
 | 共享目录 / U 盘 | `codex plugin marketplace add D:\share\workbuddy-bridge` |
 | zip | 解压后 `codex plugin marketplace add %USERPROFILE%\Downloads\workbuddy-bridge` |
 
