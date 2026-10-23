@@ -230,7 +230,5 @@ needed):
 
 The upstream is a **private, reverse-engineered API**, and bypassing its system
 prompt fingerprint is active evasion of their risk controls.
-**Small-scale use among people you know is fine; do not distribute publicly,
-publish a package, or write a tutorial.**
 Every user signs in with their own account; never pass around credentials
 belonging to other people.

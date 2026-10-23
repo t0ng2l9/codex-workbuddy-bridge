@@ -92,13 +92,8 @@ as binary so git's newline normalisation cannot corrupt the GBK + CRLF scripts.
 ## Caveats
 
 The upstream is a **private, reverse-engineered API**, and bypassing its
-system-prompt fingerprint is an active evasion of their risk controls. Therefore:
+system-prompt fingerprint is an active evasion of their risk controls.
 
-- **Small-scale sharing is fine; do not distribute publicly or publish a tutorial.**
-  Large-scale use triggers upstream abuse detection, and if the endpoint gets
-  closed everyone loses access.
-- **Do not hammer the free tier** (`hy3` / `deepseek-v4.1-flash` / `step-5-preview`);
-  high request rates trigger account-level rate limits.
 - The proxy binds to `127.0.0.1` only. **Never** change it to `0.0.0.0` - that
   would expose your account token to the whole local network.
 

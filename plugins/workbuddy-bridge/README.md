@@ -582,15 +582,6 @@ These are the two things that change most: after a desktop upgrade the binding
 name or file name may differ, and the symptom is a proxy that will not start or
 fails to decrypt.
 
-### Rate limits arrive sooner than you think
-
-Measured: eight consecutive requests already alternate `200, 429, 200, 429...` -
-**the account-level limit tracks overall activity, not how fast you send**. A 429
-is not billed; wait about a minute or switch models.
-One Codex agent task is roughly 5k-100k tokens across several tool rounds, which
-is fine; just do not treat this as a free API for batch jobs (that also gets the
-desktop app itself rate limited).
-
 ---
 
 ## Environment variables
@@ -636,19 +627,8 @@ Removes the provider block, the profile, the catalog file, the skill and the
 - The upstream is a **private, reverse-engineered API**: a single rule change can
   break everything. Bypassing the system-prompt fingerprint (`code 11128`) is
   **active evasion of upstream risk controls**.
-- Therefore: **it is technically possible to hand this to others, but do not
-  distribute it publicly, publish a package, or write a tutorial.** This is both
-  a compliance issue (it violates the upstream ToS) and self-preservation - once
-  it is used at scale the endpoint gets closed and nobody's account works
-  anymore. Passing it around privately among people you know is fine; do not put
-  it on a public repo, file host, or social platform.
 - **Every user signs in with their own account**: never copy your credential file
   to someone else (this package deliberately does nothing to make that easier).
-
-**Do not abuse the free tier**: `hy3` / `deepseek-v4.1-flash` / `step-5-preview`
-measured 0 credits, but hammering them triggers account-level rate limiting
-upstream (`code 14003`, 429) and it is your own account that suffers. Treat it as
-a bonus, not as a free API to grind.
 
 ---
 
