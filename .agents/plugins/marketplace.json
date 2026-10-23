@@ -1,7 +1,7 @@
 {
   "name": "wbbridge",
   "interface": {
-    "displayName": "WorkBuddy Bridge"
+    "displayName": "Codex WorkBuddy Bridge"
   },
   "plugins": [
     {

@@ -17,7 +17,7 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "WorkBuddy Bridge",
+    "displayName": "Codex WorkBuddy Bridge",
     "shortDescription": "Drive Codex with WorkBuddy desktop models",
     "longDescription": "Turns the models you are signed in to in the WorkBuddy AI desktop app into the Codex model source: a local proxy decrypts the desktop session, translates the Responses API into the upstream Chat Completions format, and generates the model picker catalog. Includes the hy3 / deepseek-v4.1-flash / step-5-preview tiers that measured 0 credits, plus the /wbbridge-setup one-shot installer and the /wbbridge-status self-check.",
     "developerName": "t0ng2l9",
