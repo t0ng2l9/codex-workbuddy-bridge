@@ -1,0 +1,16 @@
+# .cmd 是 GBK(cp936) 编码 + CRLF 行尾，且**内容里有中文**。
+# git 的自动换行规范化（core.autocrlf / eol）会把 CRLF 改成 LF，
+# 而 UTF-8/换行变化都会让这些脚本在 936 代码页下解析失败
+# （症状：'obreak' 不是内部或外部命令 这类莫名其妙的报错）。
+# 所以标记为 binary —— 让 git 完全不碰它们。
+*.cmd binary
+*.bat binary
+
+# 文本文件统一 LF，保证跨平台一致
+*.py   text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.ps1  binary

@@ -1,0 +1,37 @@
+{
+  "name": "workbuddy-bridge",
+  "version": "1.0.0",
+  "description": "把 WorkBuddy AI 桌面端已登录的模型接进 Codex（CLI 与桌面端），无需 OpenAI 订阅或 Codex 套餐。",
+  "author": {
+    "name": "刘"
+  },
+  "license": "MIT",
+  "keywords": [
+    "workbuddy",
+    "codebuddy",
+    "model-provider",
+    "proxy",
+    "codex",
+    "responses-api",
+    "wbbridge"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "WorkBuddy Bridge",
+    "shortDescription": "用 WorkBuddy 桌面端的模型驱动 Codex",
+    "longDescription": "把 WorkBuddy AI 桌面端已登录的模型变成 Codex 的模型源：本地代理解密桌面端登录态、把 Responses API 转成上游的 Chat Completions、并生成模型切换列表。另有 hy3 / deepseek-v4.1-flash / step-5-preview 三个实测 0 积分的免费档。附带 /wbbridge-setup 一键安装与 /wbbridge-status 自检命令。",
+    "developerName": "刘",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write",
+      "Local"
+    ],
+    "defaultPrompt": [
+      "用 /wbbridge-setup 把 WorkBuddy 模型接进 Codex",
+      "当前实际在用哪个模型？",
+      "WorkBuddy 代理连不上，帮我排查"
+    ],
+    "brandColor": "#0F766E"
+  }
+}

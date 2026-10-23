@@ -1,0 +1,20 @@
+{
+  "name": "wbbridge",
+  "interface": {
+    "displayName": "WorkBuddy Bridge"
+  },
+  "plugins": [
+    {
+      "name": "workbuddy-bridge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/workbuddy-bridge"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

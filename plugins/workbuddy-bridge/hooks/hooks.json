@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd /c \"%CLAUDE_PLUGIN_ROOT%\\scripts\\hook-session-start.cmd\"",
+            "timeoutSec": 30
+          }
+        ]
+      }
+    ]
+  }
+}

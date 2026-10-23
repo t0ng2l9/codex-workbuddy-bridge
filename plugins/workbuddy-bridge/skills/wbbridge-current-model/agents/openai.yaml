@@ -1,0 +1,7 @@
+interface:
+  display_name: "Query Current Model"
+  short_description: "Query the model Codex actually runs"
+  default_prompt: "Use $wbbridge-current-model to report which model Codex is currently running against."
+
+policy:
+  allow_implicit_invocation: true

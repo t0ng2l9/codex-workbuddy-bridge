@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.bak-wbbridge-*
+dev/_work/
+.claude/
+
+# 本地诊断脚本（逆向分析/指纹定位），不随仓库发布
+plugins/workbuddy-bridge/dev/

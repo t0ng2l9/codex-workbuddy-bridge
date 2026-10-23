@@ -1,0 +1,8 @@
+# 存成 %USERPROFILE%\.codex\wbb.config.toml
+# 注意：0.162 起 profile 必须是独立文件，写在 config.toml 里会被判为 legacy 并报错。
+#
+# 用法：codex --profile wbb
+
+model_provider = "wbbridge"
+model = "deepseek-v4.1-flash"     # 免费档；hy3 / step-5-preview 同样免费
+model_reasoning_effort = "low"
