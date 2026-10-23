@@ -1,4 +1,4 @@
-# WorkBuddy Bridge - Codex Plugin Marketplace
+# Codex WorkBuddy Bridge - Codex Plugin Marketplace
 
 Connect the models you are already signed in to in the **WorkBuddy AI desktop app
 (international build)** to **Codex** (CLI and desktop app). No OpenAI subscription
